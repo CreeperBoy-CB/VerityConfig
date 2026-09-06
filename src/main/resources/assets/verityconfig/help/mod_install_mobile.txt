@@ -1,0 +1,14 @@
+如果这个管理模组的界面没有你想要的模组，可以按以下步骤安装模组：
+1.在fcl中点击下载，再点击左边的Mod
+<fcl_download_mod.jpg>
+2.将版本限定为1.20.1 Forge(因为整合包本身就是这个版本，下载其他版本的会导致崩溃)
+<fcl_version_limit.jpg>
+3.在输入框内搜索你想要下载的模组点进去
+<fcl_mod_search.jpg>
+4.点击推荐的版本：1.20.1 Forge
+<fcl_choose_mod_version.jpg>
+5.点击最新的版本
+<fcl_choose_newest_mod.jpg>
+6.点击下载并确认
+<fcl_mod_install.jpg>
+7.重新启动游戏，模组应该已经安装

@@ -1,0 +1,10 @@
+modLoader = "javafml"
+loaderVersion = "[46,)"
+license = "All rights reserved"
+
+[[mods]]
+modId = "verityconfig"
+version = "1.5.1"
+displayName = "Verity Config"
+description = "在游戏内配置 Verity 模组的 AI 参数"
+logoFile = "pack.png"
