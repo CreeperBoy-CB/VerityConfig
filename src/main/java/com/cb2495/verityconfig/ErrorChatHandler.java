@@ -68,9 +68,12 @@ public class ErrorChatHandler {
     private static void handleDeepSeekError(JsonObject json) {
         String errorMessage = json.has("message") ? json.get("message").getAsString() : "";
 
-        if (errorMessage.contains("Authentication Fails")) {
+        // 401: Authentication Fails, Your api key: xxx is invalid
+        if (errorMessage.contains("Authentication Fails, Your api key:") && errorMessage.contains("is invalid")) {
             sendMessage("填写了错误的 API Key，请输入 /vc cs 并重新走一遍 AI 配置流程");
-        } else if (errorMessage.contains("Insufficient Balance")) {
+        }
+        // 402: Insufficient Balance
+        else if (errorMessage.contains("Insufficient Balance")) {
             sendMessageWithLink("账号余额不足，请", "点击此处", "https://platform.deepseek.com/top_up", "前往 DeepSeek 官网充值");
         } else {
             sendGenericMessage();
