@@ -252,6 +252,14 @@ public class VerityConfigScreen extends Screen {
             Minecraft.getInstance().setScreen(new AdvancedSettingsScreen());
         }).pos(this.width - 80, 5).size(70, 20).build());
 
+        // 配置模组按钮（仅非首次启动显示）
+        if (!ModsListScreen.firstTimeSetup) {
+            this.addRenderableWidget(Button.builder(Component.literal("配置模组"), btn -> {
+                ModsListScreen.returnToConfigScreen = true;
+                Minecraft.getInstance().setScreen(new ModsListScreen());
+            }).pos(this.width - 80, 30).size(70, 20).build());
+        }
+
         updateSponsorButtonText();
     }
 

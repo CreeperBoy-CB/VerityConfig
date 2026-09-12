@@ -5,26 +5,17 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.fml.loading.FMLPaths;
 
-import java.io.File;
-import java.nio.file.Path;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class WelcomeScreen extends Screen {
-
-    private final String modpackVersion = "6.5.1";   // 整合包版本，可修改
-    private String verityVersion = "未知";
-    private String configModVersion = "未知";
 
     // 新增：内存警告文字
     private String memoryWarning = null;
 
     public WelcomeScreen() {
         super(Component.literal("欢迎"));
-        loadModVersions();
-        checkMemory(); // 新增：检测内存
+        VerityConfig.loadVersions(); // 使用统一版本加载
+        checkMemory();
     }
 
     // 新增：检测JVM最大内存
@@ -38,41 +29,6 @@ public class WelcomeScreen extends Screen {
 
     private Button solutionButton; // 解决方法按钮
 
-    private void loadModVersions() {
-        Path modsDir = FMLPaths.MODSDIR.get();
-        File dir = modsDir.toFile();
-
-        if (!dir.exists() || !dir.isDirectory()) {
-            return;
-        }
-
-        File[] files = dir.listFiles();
-        if (files == null) return;
-
-        for (File file : files) {
-            String name = file.getName();
-            if (name.startsWith("[Verity配置工具]")) {
-                configModVersion = extractVersion(name);
-            } else if (name.startsWith("[Verity]")) {
-                verityVersion = extractVersion(name);
-            }
-        }
-    }
-
-    private String extractVersion(String filename) {
-        Pattern quotePattern = Pattern.compile("['\"]([^'\"]*)['\"]");
-        Matcher matcher = quotePattern.matcher(filename);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
-        Pattern versionPattern = Pattern.compile("(\\d+(?:\\.\\d+)+)");
-        Matcher versionMatcher = versionPattern.matcher(filename);
-        if (versionMatcher.find()) {
-            return versionMatcher.group(1);
-        }
-        return "未知";
-    }
-
     @Override
     protected void init() {
         // 创建“点击此处获取解决方法”按钮（仅内存不足时显示）
@@ -84,10 +40,7 @@ public class WelcomeScreen extends Screen {
 
         int centerX = this.width / 2;
         this.addRenderableWidget(Button.builder(Component.literal("继续"), btn -> {
-            ModsListScreen.modpackVersion = this.modpackVersion;
-            ModsListScreen.verityVersion = this.verityVersion;
-            ModsListScreen.configModVersion = this.configModVersion;
-            ModsListScreen.firstTimeSetup = true;
+            ModsListScreen.firstTimeSetup = true; // 标记为首次启动流程
             Minecraft.getInstance().setScreen(new VerityConfigScreen());
         }).pos(centerX - 50, this.height - 50).size(100, 20).build());
     }
@@ -119,7 +72,7 @@ public class WelcomeScreen extends Screen {
         graphics.pose().popPose();
 
         // ===== 版本号（白色，紧贴标题下方） =====
-        graphics.drawCenteredString(this.font, modpackVersion, centerX, this.height / 2 - 20, 0xFFFFFF);
+        graphics.drawCenteredString(this.font, ModsListScreen.modpackVersion, centerX, this.height / 2 - 20, 0xFFFFFF);
 
         // ===== 内存警告（红色，版本号下方） =====
         if (memoryWarning != null) {
@@ -131,7 +84,7 @@ public class WelcomeScreen extends Screen {
         graphics.drawCenteredString(this.font, "作者 @CB2495", centerX, authorY, 0xFFAAAAAA);
 
 // ===== 版本信息（灰色，位置动态调整） =====
-        String versionInfo = "Verity 模组版本: " + verityVersion + "  |  配置工具版本: " + configModVersion;
+        String versionInfo = "Verity 模组版本: " + ModsListScreen.verityVersion + "  |  配置工具版本: " + ModsListScreen.configModVersion;
         int versionInfoY = memoryWarning != null ? this.height / 2 + 46 : this.height / 2 + 26;
         graphics.drawCenteredString(this.font, versionInfo, centerX, versionInfoY, 0xFFAAAAAA);
 

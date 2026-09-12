@@ -58,6 +58,13 @@ public class ClientCommands {
                                     return 1;
                                 })
                         )
+                        .then(Commands.literal("modls")
+                                .executes(ctx -> {
+                                    ModsListScreen.returnToConfigScreen = false; // 独立打开，不返回配置界面
+                                    Minecraft.getInstance().setScreen(new ModsListScreen());
+                                    return 1;
+                                })
+                        )
         );
     }
 
@@ -83,7 +90,9 @@ public class ClientCommands {
         mc.player.displayClientMessage(Component.literal("==== VerityConfig 指令 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
         mc.player.displayClientMessage(Component.literal("/vc cs - 打开配置界面"), false);
         mc.player.displayClientMessage(Component.literal("/vc help <主题> - 打开指定帮助主题"), false);
+        mc.player.displayClientMessage(Component.literal("/vc qanda - 查看常见问题解答"), false);
         mc.player.displayClientMessage(Component.literal("/vc help - 查看此列表"), false);
+        mc.player.displayClientMessage(Component.literal("/vc modlist - 打开模组管理界面"), false);
     }
 
     private static void openHelpTopic(String topic) {

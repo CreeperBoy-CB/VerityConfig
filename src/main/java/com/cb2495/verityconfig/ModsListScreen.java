@@ -25,6 +25,7 @@ public class ModsListScreen extends Screen {
     public static String verityVersion = "未知";
     public static String configModVersion = "未知";
     public static boolean firstTimeSetup = false;
+    public static boolean returnToConfigScreen = false;
 
     private static final String[] CATEGORY_TABS = {"全部", "前置", "性能优化", "生存辅助", "视觉优化"};
     private int selectedCategory = 0;
@@ -246,7 +247,11 @@ public class ModsListScreen extends Screen {
 
     @Override
     protected void init() {
-        enableAutoMods();
+        VerityConfig.loadVersions();
+
+        if (firstTimeSetup) {
+            enableAutoMods();
+        }
         loadModList();
 
         this.scrollableArea = new ScrollableArea(LIST_TOP, this.height - 10);
@@ -254,7 +259,12 @@ public class ModsListScreen extends Screen {
 
         int rightX = this.width - 80;
         this.doneButton = Button.builder(Component.literal("完成"), btn -> {
-            showRestartConfirm();
+            if (returnToConfigScreen) {
+                returnToConfigScreen = false;
+                Minecraft.getInstance().setScreen(new VerityConfigScreen());
+            } else {
+                showRestartConfirm();
+            }
         }).pos(rightX, 5).size(70, 20).build();
         this.addRenderableWidget(this.doneButton);
 
@@ -720,6 +730,11 @@ public class ModsListScreen extends Screen {
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(null);
+        if (returnToConfigScreen) {
+            returnToConfigScreen = false;
+            Minecraft.getInstance().setScreen(new VerityConfigScreen());
+        } else {
+            Minecraft.getInstance().setScreen(null);
+        }
     }
 }
