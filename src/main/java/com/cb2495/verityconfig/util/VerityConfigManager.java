@@ -78,12 +78,12 @@ public class VerityConfigManager {
         List<String> lines = ConfigFileUtils.readLines(CONFIG_FILE);
         for (String line : lines) {
             line = line.trim();
-            if (line.startsWith("apiKey")) data.apiKey = ConfigFileUtils.extractStringValue(line);
-            else if (line.startsWith("aiEndpoint")) data.endpoint = ConfigFileUtils.extractStringValue(line);
-            else if (line.startsWith("aiModel")) data.model = ConfigFileUtils.extractStringValue(line);
-            else if (line.startsWith("aiThink")) data.think = ConfigFileUtils.parseBoolean(line);
-            else if (line.startsWith("ttsProvider")) data.ttsProvider = ConfigFileUtils.extractStringValue(line);
-            else if (line.startsWith("useTTS")) data.useTTS = ConfigFileUtils.parseBoolean(line);
+            if (ConfigFileUtils.lineMatchesKey(line, "apiKey")) data.apiKey = ConfigFileUtils.extractStringValue(line);
+            else if (ConfigFileUtils.lineMatchesKey(line, "aiEndpoint")) data.endpoint = ConfigFileUtils.extractStringValue(line);
+            else if (ConfigFileUtils.lineMatchesKey(line, "aiModel")) data.model = ConfigFileUtils.extractStringValue(line);
+            else if (ConfigFileUtils.lineMatchesKey(line, "aiThink")) data.think = ConfigFileUtils.parseBoolean(line);
+            else if (ConfigFileUtils.lineMatchesKey(line, "ttsProvider")) data.ttsProvider = ConfigFileUtils.extractStringValue(line);
+            else if (ConfigFileUtils.lineMatchesKey(line, "useTTS")) data.useTTS = ConfigFileUtils.parseBoolean(line);
         }
         // 如果 API Key 为空，强制默认
         if (data.apiKey.isEmpty()) {

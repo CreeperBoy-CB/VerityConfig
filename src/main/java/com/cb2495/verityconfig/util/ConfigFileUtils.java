@@ -35,7 +35,7 @@ public final class ConfigFileUtils {
     public static void replaceOrAddRaw(List<String> lines, String key, String value) {
         boolean found = false;
         for (int i = 0; i < lines.size(); i++) {
-            if (lines.get(i).trim().startsWith(key)) {
+            if (lineMatchesKey(lines.get(i), key)) {
                 lines.set(i, key + " = " + value);
                 found = true;
                 break;
@@ -52,7 +52,7 @@ public final class ConfigFileUtils {
     public static void replaceOrAddString(List<String> lines, String key, String value) {
         boolean found = false;
         for (int i = 0; i < lines.size(); i++) {
-            if (lines.get(i).trim().startsWith(key)) {
+            if (lineMatchesKey(lines.get(i), key)) {
                 lines.set(i, key + " = \"" + value + "\"");
                 found = true;
                 break;
@@ -74,6 +74,14 @@ public final class ConfigFileUtils {
 
     public static boolean parseBoolean(String line) {
         return line.contains("true");
+    }
+
+    public static boolean lineMatchesKey(String line, String key) {
+        String trimmed = line.trim();
+        if (!trimmed.startsWith(key)) return false;
+        if (trimmed.length() == key.length()) return true;
+        char next = trimmed.charAt(key.length());
+        return next == '=' || next == ' ' || next == '\t';
     }
 
     public static int parseInt(String line, int defaultVal) {
