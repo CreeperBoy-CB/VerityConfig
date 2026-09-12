@@ -65,6 +65,9 @@ public class ErrorChatHandler {
         }
     }
 
+    private static final java.util.List<Component> pendingComponents = new java.util.ArrayList<>();
+    private static int pendingTicks = 0;
+
     private static void handleDeepSeekError(JsonObject json) {
         String errorMessage = json.has("message") ? json.get("message").getAsString() : "";
 
@@ -113,19 +116,14 @@ public class ErrorChatHandler {
     }
 
     private static void sendMessage(String text) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-        mc.player.displayClientMessage(
+        pendingComponents.add(
                 Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
-                        .append(Component.literal(text).withStyle(ChatFormatting.WHITE)),
-                false
+                        .append(Component.literal(text).withStyle(ChatFormatting.WHITE))
         );
+        pendingTicks = 2;
     }
 
     private static void sendMessageWithLink(String prefix, String linkText, String url, String suffix) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-
         Component msg = Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
                 .append(Component.literal(prefix).withStyle(ChatFormatting.WHITE))
                 .append(Component.literal(linkText)
@@ -135,7 +133,24 @@ public class ErrorChatHandler {
                                 .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("点击打开链接")))
                         ))
                 .append(Component.literal(suffix).withStyle(ChatFormatting.WHITE));
-
-        mc.player.displayClientMessage(msg, false);
+        pendingComponents.add(msg);
+        pendingTicks = 2;
     }
+
+    @SubscribeEvent
+    public static void onClientTick(net.minecraftforge.event.TickEvent.ClientTickEvent event) {
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+        if (pendingTicks <= 0) return;
+        pendingTicks--;
+        if (pendingTicks == 0 && !pendingComponents.isEmpty()) {
+            Minecraft mc = Minecraft.getInstance();
+            for (Component c : pendingComponents) {
+                if (mc.player != null) {
+                    mc.player.displayClientMessage(c, false);
+                }
+            }
+            pendingComponents.clear();
+        }
+    }
+
 }
