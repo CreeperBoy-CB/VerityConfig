@@ -109,7 +109,7 @@ public class ErrorChatHandler {
     }
 
     private static void sendGenericMessage() {
-        sendMessage("请查看报错内容中的 message 段落");
+        sendMessage("请查看报错内容中的 message 段落，如果没有则重点观看整段信息，也可以把它发到QQ群或发给豆包");
     }
 
     private static void sendMessage(String text) {
