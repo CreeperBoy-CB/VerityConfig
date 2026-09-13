@@ -1,5 +1,6 @@
 package com.cb2495.verityconfig;
 
+import com.cb2495.verityconfig.util.VerityMemoryManager;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.ChatFormatting;
@@ -65,6 +66,36 @@ public class ClientCommands {
                                     return 1;
                                 })
                         )
+                        .then(Commands.literal("verity")
+                                .then(Commands.literal("mfix")
+                                        .executes(ctx -> {
+                                            VerityMemoryManager.fix();
+                                            return 1;
+                                        })
+                                        .then(Commands.literal("rb")
+                                                .executes(ctx -> {
+                                                    showMemoryRestoreList();
+                                                    return 1;
+                                                })
+                                                .then(Commands.literal("vcm").executes(ctx -> {
+                                                    VerityMemoryManager.restore("vcm");
+                                                    return 1;
+                                                }))
+                                                .then(Commands.literal("vm").executes(ctx -> {
+                                                    VerityMemoryManager.restore("vm");
+                                                    return 1;
+                                                }))
+                                                .then(Commands.literal("all").executes(ctx -> {
+                                                    VerityMemoryManager.restore("all");
+                                                    return 1;
+                                                }))
+                                                .then(Commands.literal("del").executes(ctx -> {
+                                                    VerityMemoryManager.delete();
+                                                    return 1;
+                                                }))
+                                        )
+                                )
+                        )
         );
     }
 
@@ -93,6 +124,20 @@ public class ClientCommands {
         mc.player.displayClientMessage(Component.literal("/vc qanda - 查看常见问题解答"), false);
         mc.player.displayClientMessage(Component.literal("/vc help - 查看此列表"), false);
         mc.player.displayClientMessage(Component.literal("/vc modlist - 打开模组管理界面"), false);
+        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb - 管理 Verity 的记忆文件"), false);
+        mc.player.displayClientMessage(Component.literal("/vc verity mfix - 修复 Verity 的记忆文件"), false);
+    }
+
+    private static void showMemoryRestoreList() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+
+        mc.player.displayClientMessage(Component.literal("==== Verity 记忆备份恢复 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
+        mc.player.displayClientMessage(Component.literal("/vc verity mfix - 修复当前聊天记忆（移除空 AI 消息）"), false);
+        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb vcm - 恢复聊天记忆备份"), false);
+        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb vm - 恢复长期记忆备份"), false);
+        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb all - 恢复所有记忆备份"), false);
+        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb del - 删除记忆文件（让 Verity 重新生成）"), false);
     }
 
     private static void openHelpTopic(String topic) {

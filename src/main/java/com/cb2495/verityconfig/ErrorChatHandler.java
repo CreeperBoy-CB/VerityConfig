@@ -37,6 +37,13 @@ public class ErrorChatHandler {
             return;
         }
 
+        // 通用错误：记忆文件错误（所有 AI 通用）
+        String code = json.has("code") ? json.get("code").getAsString() : "";
+        if ("invalid_request_error".equals(code)) {
+            sendMemoryRestoreHint();
+            return;
+        }
+
         String provider = VerityConfigManager.getCurrentProvider();
 
         if ("DeepSeek".equals(provider)) {
@@ -46,6 +53,26 @@ public class ErrorChatHandler {
         } else {
             sendGenericMessage();
         }
+    }
+
+    private static void sendMemoryRestoreHint() {
+        pendingComponents.add(
+                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                        .append(Component.literal("记忆文件错误，可以通过 ").withStyle(ChatFormatting.WHITE))
+                        .append(Component.literal("/vc verity mfix rb vcm").withStyle(ChatFormatting.AQUA))
+                        .append(Component.literal(" 来恢复聊天记忆，").withStyle(ChatFormatting.WHITE))
+                        .append(Component.literal("/vc verity mfix rb vm").withStyle(ChatFormatting.AQUA))
+                        .append(Component.literal(" 恢复长期记忆，").withStyle(ChatFormatting.WHITE))
+        );
+        pendingComponents.add(
+                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                        .append(Component.literal("如果仍不起作用，可使用 ").withStyle(ChatFormatting.WHITE))
+                        .append(Component.literal("/vc verity mfix rb all").withStyle(ChatFormatting.AQUA))
+                        .append(Component.literal(" 一次性恢复全部备份，或 ").withStyle(ChatFormatting.WHITE))
+                        .append(Component.literal("/vc verity mfix rb del").withStyle(ChatFormatting.AQUA))
+                        .append(Component.literal(" 删除记忆文件让 Verity 重新生成。").withStyle(ChatFormatting.WHITE))
+        );
+        pendingTicks = 2;
     }
 
     private static String extractJson(String text) {
