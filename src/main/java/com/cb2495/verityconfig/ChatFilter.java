@@ -1,7 +1,5 @@
 package com.cb2495.verityconfig;
 
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
@@ -11,10 +9,6 @@ import net.minecraftforge.fml.common.Mod;
 @Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
 public class ChatFilter {
 
-    private static final String SETUP_TUTORIAL = "Need help setting up this mod? Watch this tutorial.";
-    private static final String AI_TUTORIAL = "Problem setting AI? Watch this tutorial.";
-    private static final String SETUP_TUTORIAL_LINK = "Setup Tutorial";
-
     @SubscribeEvent
     public static void onClientChatReceived(ClientChatReceivedEvent event) {
         Component message = event.getMessage();
@@ -22,30 +16,24 @@ public class ChatFilter {
 
         String text = message.getString();
 
-        // 完全匹配需要替换的消息
-        if (SETUP_TUTORIAL.equals(text)) {
+        // 三条教程提示，使用关键词组合匹配，避免因格式拆分导致完整短语匹配失败
+        if (containsAll(text, "Need help setting up this mod", "Watch this tutorial")) {
             event.setCanceled(true);
-            sendCustomHelpMessage();
             return;
         }
-
-        // 其他仅屏蔽
-        if (text.contains(AI_TUTORIAL) || text.contains(SETUP_TUTORIAL_LINK)) {
+        if (containsAll(text, "Problem setting AI", "Watch this tutorial")) {
+            event.setCanceled(true);
+            return;
+        }
+        if (text.contains("Setup Tutorial")) {
             event.setCanceled(true);
         }
     }
 
-    private static void sendCustomHelpMessage() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-
-        Component helpMsg = Component.literal("[VerityConfig] ")
-                .append(Component.literal("如果你在游玩过程中遇到任何问题，随时输入 ")
-                        .withStyle(ChatFormatting.YELLOW))
-                .append(Component.literal("/vc qanda").withStyle(ChatFormatting.AQUA))
-                .append(Component.literal(" 获取帮助，如果没有在列表里找到你的问题，也可以在QQ交流群中提问。")
-                        .withStyle(ChatFormatting.YELLOW));
-
-        mc.player.displayClientMessage(helpMsg, false);
+    private static boolean containsAll(String text, String... keywords) {
+        for (String k : keywords) {
+            if (!text.contains(k)) return false;
+        }
+        return true;
     }
 }

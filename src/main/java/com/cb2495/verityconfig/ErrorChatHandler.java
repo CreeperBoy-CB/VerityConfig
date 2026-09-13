@@ -38,7 +38,7 @@ public class ErrorChatHandler {
         }
 
         // 通用错误：记忆文件错误（所有 AI 通用）
-        String code = json.has("code") ? json.get("code").getAsString() : "";
+        String code = getCode(json);
         if ("invalid_request_error".equals(code)) {
             sendMemoryRestoreHint();
             return;
@@ -96,14 +96,11 @@ public class ErrorChatHandler {
     private static int pendingTicks = 0;
 
     private static void handleDeepSeekError(JsonObject json) {
-        String errorMessage = json.has("message") ? json.get("message").getAsString() : "";
+        String errorMessage = getMessage(json);
 
-        // 401: Authentication Fails, Your api key: xxx is invalid
         if (errorMessage.contains("Authentication Fails, Your api key:") && errorMessage.contains("is invalid")) {
             sendMessage("填写了错误的 API Key，请输入 /vc cs 并重新走一遍 AI 配置流程");
-        }
-        // 402: Insufficient Balance
-        else if (errorMessage.contains("Insufficient Balance")) {
+        } else if (errorMessage.contains("Insufficient Balance")) {
             sendMessageWithLink("账号余额不足，请", "点击此处", "https://platform.deepseek.com/top_up", "前往 DeepSeek 官网充值");
         } else {
             sendGenericMessage();
@@ -111,26 +108,18 @@ public class ErrorChatHandler {
     }
 
     private static void handleZhipuError(JsonObject json) {
-        Integer code = null;
-        if (json.has("code")) {
-            try {
-                code = json.get("code").getAsInt();
-            } catch (Exception ignored) {}
-        }
-
-        if (code == null) {
-            sendGenericMessage();
-            return;
-        }
+        String code = getCode(json);
 
         switch (code) {
-            case 1113:
-                sendMessageWithLink("如果你选择了付费模型，需要前往", "此处", "https://open.bigmodel.cn/finance-center/finance/pay", "给智谱账号充值，否则请输入 /vc cs 并将模型切换至免费模型");
+            case "1113":
+                sendMessageWithLink("如果你选择了付费模型，需要前往", "此处",
+                        "https://open.bigmodel.cn/finance-center/finance/pay",
+                        "给智谱账号充值，否则请输入 /vc cs 并将模型切换至免费模型");
                 break;
-            case 1302:
+            case "1302":
                 sendMessage("智谱限速较明显，建议切换至其他提供商或使用付费模型，如果不想切换可以等待一小段时间或输入 /vc cs 切换其他免费模型");
                 break;
-            case 1305:
+            case "1305":
                 sendMessage("智谱免费模型使用人数较多，可以尝试输入 /vc cs 切换至其他模型");
                 break;
             default:
@@ -162,6 +151,24 @@ public class ErrorChatHandler {
                 .append(Component.literal(suffix).withStyle(ChatFormatting.WHITE));
         pendingComponents.add(msg);
         pendingTicks = 2;
+    }
+
+    private static String getCode(JsonObject json) {
+        // 优先从 error 对象中取
+        if (json.has("error") && json.get("error").isJsonObject()) {
+            JsonObject error = json.getAsJsonObject("error");
+            if (error.has("code")) return error.get("code").getAsString();
+        }
+        // 回退到顶层
+        return json.has("code") ? json.get("code").getAsString() : "";
+    }
+
+    private static String getMessage(JsonObject json) {
+        if (json.has("error") && json.get("error").isJsonObject()) {
+            JsonObject error = json.getAsJsonObject("error");
+            if (error.has("message")) return error.get("message").getAsString();
+        }
+        return json.has("message") ? json.get("message").getAsString() : "";
     }
 
     @SubscribeEvent
