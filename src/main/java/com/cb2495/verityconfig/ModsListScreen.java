@@ -101,6 +101,7 @@ public class ModsListScreen extends Screen {
         MOD_INTRODUCTIONS.put("玉 🔍", "显示你所注视的目标的相关信息");
         MOD_INTRODUCTIONS.put("简单翻译", "客户端实时翻译模组,支持翻译聊天，书籍，告示牌，HUD等等界面");
         MOD_INTRODUCTIONS.put("苹果皮", "饥饿/食物相关的 HUD 改进");
+        MOD_INTRODUCTIONS.put("触摸控制器", "让Java版有类似基岩版的操作体验");
         MOD_INTRODUCTIONS.put("生物瓶子", "捕捉生物(比如 Verity )");
         MOD_INTRODUCTIONS.put("输入法冲突修复", "妈妈再也不用担心我玩MC卡输入法了");
         MOD_INTRODUCTIONS.put("连锁破坏", "就是你想的那个连锁采集");
