@@ -1,6 +1,7 @@
 package com.cb2495.verityconfig;
 
 import com.cb2495.verityconfig.util.VerityConfigManager;
+import com.cb2495.verityconfig.util.VerityMemoryManager;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.ChatFormatting;
@@ -10,11 +11,19 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
 public class ErrorChatHandler {
+
+    // 待发送消息队列与 2 tick 延迟
+    private static final List<Component> pendingComponents = new ArrayList<>();
+    private static int pendingTicks = 0;
 
     @SubscribeEvent
     public static void onClientChatReceived(ClientChatReceivedEvent event) {
@@ -24,7 +33,10 @@ public class ErrorChatHandler {
         String text = message.getString();
         if (!text.contains("ERROR")) return;
 
-        // 提取 JSON 部分
+        // 检测到错误，取消待执行的备份，避免坏文件覆盖好备份
+        VerityMemoryManager.cancelPending();
+
+        // 提取 JSON
         String jsonPart = extractJson(text);
         if (jsonPart == null) {
             sendGenericMessage();
@@ -45,7 +57,6 @@ public class ErrorChatHandler {
         }
 
         String provider = VerityConfigManager.getCurrentProvider();
-
         if ("DeepSeek".equals(provider)) {
             handleDeepSeekError(json);
         } else if ("智谱 (GLM)".equals(provider)) {
@@ -55,28 +66,10 @@ public class ErrorChatHandler {
         }
     }
 
-    private static void sendMemoryRestoreHint() {
-        pendingComponents.add(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
-                        .append(Component.literal("记忆文件错误，可以通过 ").withStyle(ChatFormatting.WHITE))
-                        .append(Component.literal("/vc verity mfix rb vcm").withStyle(ChatFormatting.AQUA))
-                        .append(Component.literal(" 来恢复聊天记忆，").withStyle(ChatFormatting.WHITE))
-                        .append(Component.literal("/vc verity mfix rb vm").withStyle(ChatFormatting.AQUA))
-                        .append(Component.literal(" 恢复长期记忆，").withStyle(ChatFormatting.WHITE))
-        );
-        pendingComponents.add(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
-                        .append(Component.literal("如果仍不起作用，可使用 ").withStyle(ChatFormatting.WHITE))
-                        .append(Component.literal("/vc verity mfix rb all").withStyle(ChatFormatting.AQUA))
-                        .append(Component.literal(" 一次性恢复全部备份，或 ").withStyle(ChatFormatting.WHITE))
-                        .append(Component.literal("/vc verity mfix rb del").withStyle(ChatFormatting.AQUA))
-                        .append(Component.literal(" 删除记忆文件让 Verity 重新生成。").withStyle(ChatFormatting.WHITE))
-        );
-        pendingTicks = 2;
-    }
-
+    // ---------- JSON 提取与解析 ----------
     private static String extractJson(String text) {
-        int start = text.indexOf('{');
+        int errorIdx = text.indexOf("ERROR");
+        int start = text.indexOf('{', errorIdx >= 0 ? errorIdx : 0);
         int end = text.lastIndexOf('}');
         if (start != -1 && end > start) {
             return text.substring(start, end + 1);
@@ -92,16 +85,37 @@ public class ErrorChatHandler {
         }
     }
 
-    private static final java.util.List<Component> pendingComponents = new java.util.ArrayList<>();
-    private static int pendingTicks = 0;
+    /** 兼容 {"error":{"code":...}} 嵌套结构与顶层结构 */
+    private static String getCode(JsonObject json) {
+        if (json.has("error") && json.get("error").isJsonObject()) {
+            JsonObject error = json.getAsJsonObject("error");
+            if (error.has("code")) return error.get("code").getAsString();
+        }
+        return json.has("code") ? json.get("code").getAsString() : "";
+    }
 
+    /** 兼容 {"error":{"message":...}} 嵌套结构与顶层结构 */
+    private static String getMessage(JsonObject json) {
+        if (json.has("error") && json.get("error").isJsonObject()) {
+            JsonObject error = json.getAsJsonObject("error");
+            if (error.has("message")) return error.get("message").getAsString();
+        }
+        return json.has("message") ? json.get("message").getAsString() : "";
+    }
+
+    // ---------- 提供商处理 ----------
     private static void handleDeepSeekError(JsonObject json) {
         String errorMessage = getMessage(json);
 
+        // 401: Authentication Fails, Your api key: xxx is invalid
         if (errorMessage.contains("Authentication Fails, Your api key:") && errorMessage.contains("is invalid")) {
-            sendMessage("填写了错误的 API Key，请输入 /vc cs 并重新走一遍 AI 配置流程");
-        } else if (errorMessage.contains("Insufficient Balance")) {
-            sendMessageWithLink("账号余额不足，请", "点击此处", "https://platform.deepseek.com/top_up", "前往 DeepSeek 官网充值");
+            sendApiKeyHint();
+        }
+        // 402: Insufficient Balance
+        else if (errorMessage.contains("Insufficient Balance")) {
+            sendMessageWithLink("账号余额不足，请", "点击此处",
+                    "https://platform.deepseek.com/top_up",
+                    "前往 DeepSeek 官网充值");
         } else {
             sendGenericMessage();
         }
@@ -127,8 +141,39 @@ public class ErrorChatHandler {
         }
     }
 
+    // ---------- 提示发送 ----------
     private static void sendGenericMessage() {
-        sendMessage("请查看报错内容中的 message 段落，如果没有则重点观看整段信息，也可以把它发到QQ群或发给豆包");
+        sendMessage("请查看报错内容中的 message 段落");
+    }
+
+    private static void sendApiKeyHint() {
+        pendingComponents.add(
+                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                        .append(Component.literal("填写了错误的 API Key，请输入 ").withStyle(ChatFormatting.WHITE))
+                        .append(suggestCmd("/vc cs", "点击填入命令"))
+                        .append(Component.literal(" 并重新走一遍 AI 配置流程").withStyle(ChatFormatting.WHITE))
+        );
+        pendingTicks = 2;
+    }
+
+    private static void sendMemoryRestoreHint() {
+        pendingComponents.add(
+                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                        .append(Component.literal("记忆文件错误，可以尝试 ").withStyle(ChatFormatting.WHITE))
+                        .append(suggestCmd("/vc verity mfix", "点击填入命令"))
+                        .append(Component.literal(" 修复，或 ").withStyle(ChatFormatting.WHITE))
+                        .append(suggestCmd("/vc verity mfix rb vcm", "点击填入命令"))
+                        .append(Component.literal(" 恢复聊天记忆备份。").withStyle(ChatFormatting.WHITE))
+        );
+        pendingComponents.add(
+                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                        .append(Component.literal("如果仍不起作用，可使用 ").withStyle(ChatFormatting.WHITE))
+                        .append(suggestCmd("/vc verity mfix rb all", "点击填入命令"))
+                        .append(Component.literal(" 恢复全部备份，或 ").withStyle(ChatFormatting.WHITE))
+                        .append(suggestCmd("/vc verity mfix rb del", "点击填入命令"))
+                        .append(Component.literal(" 删除记忆文件让 Verity 重新生成。").withStyle(ChatFormatting.WHITE))
+        );
+        pendingTicks = 2;
     }
 
     private static void sendMessage(String text) {
@@ -153,38 +198,29 @@ public class ErrorChatHandler {
         pendingTicks = 2;
     }
 
-    private static String getCode(JsonObject json) {
-        // 优先从 error 对象中取
-        if (json.has("error") && json.get("error").isJsonObject()) {
-            JsonObject error = json.getAsJsonObject("error");
-            if (error.has("code")) return error.get("code").getAsString();
-        }
-        // 回退到顶层
-        return json.has("code") ? json.get("code").getAsString() : "";
+    private static Component suggestCmd(String command, String hover) {
+        return Component.literal(command)
+                .withStyle(style -> style
+                        .withColor(ChatFormatting.AQUA)
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, command))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(hover)))
+                );
     }
 
-    private static String getMessage(JsonObject json) {
-        if (json.has("error") && json.get("error").isJsonObject()) {
-            JsonObject error = json.getAsJsonObject("error");
-            if (error.has("message")) return error.get("message").getAsString();
-        }
-        return json.has("message") ? json.get("message").getAsString() : "";
-    }
-
+    // ---------- 2 tick 延迟发送 ----------
     @SubscribeEvent
-    public static void onClientTick(net.minecraftforge.event.TickEvent.ClientTickEvent event) {
-        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
         if (pendingTicks <= 0) return;
         pendingTicks--;
         if (pendingTicks == 0 && !pendingComponents.isEmpty()) {
             Minecraft mc = Minecraft.getInstance();
-            for (Component c : pendingComponents) {
-                if (mc.player != null) {
+            if (mc.player != null) {
+                for (Component c : pendingComponents) {
                     mc.player.displayClientMessage(c, false);
                 }
             }
             pendingComponents.clear();
         }
     }
-
 }

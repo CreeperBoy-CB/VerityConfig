@@ -123,6 +123,26 @@ public class VerityMemoryManager {
         return false;
     }
 
+    private static void sendRestartHint() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+
+        Component msg = Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal("操作需要重启游戏才能生效，请输入 ").withStyle(ChatFormatting.WHITE))
+                .append(Component.literal("/vc exitgame")
+                        .withStyle(style -> style
+                                .withColor(ChatFormatting.AQUA)
+                                .withClickEvent(new net.minecraft.network.chat.ClickEvent(
+                                        net.minecraft.network.chat.ClickEvent.Action.SUGGEST_COMMAND, "/vc exitgame"))
+                                .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
+                                        net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
+                                        Component.literal("点击填入命令")))
+                        ))
+                .append(Component.literal(" 退出游戏，随后再次启动。").withStyle(ChatFormatting.WHITE));
+
+        mc.player.displayClientMessage(msg, false);
+    }
+
     // ---------- 修复 ----------
     /** 修复聊天记忆文件：移除"空 AI 消息" */
     public static void fix() {
@@ -182,6 +202,7 @@ public class VerityMemoryManager {
             Files.writeString(chatMemory, pretty, StandardCharsets.UTF_8);
 
             sendMessage("已修复，移除了 " + removed + " 条空 AI 消息");
+            sendRestartHint();
         } catch (Exception e) {
             sendMessage("修复失败: " + e.getMessage());
         }
@@ -219,6 +240,7 @@ public class VerityMemoryManager {
             try {
                 Files.copy(backup, source, StandardCopyOption.REPLACE_EXISTING);
                 sendMessage("已恢复: " + source.getFileName());
+                sendRestartHint();
             } catch (IOException e) {
                 sendMessage("恢复失败: " + source.getFileName() + " - " + e.getMessage());
             }
@@ -240,6 +262,7 @@ public class VerityMemoryManager {
                 try {
                     Files.delete(source);
                     sendMessage("已删除: " + source.getFileName());
+                    sendRestartHint();
                 } catch (IOException e) {
                     sendMessage("删除失败: " + source.getFileName() + " - " + e.getMessage());
                 }

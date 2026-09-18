@@ -6,15 +6,16 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraft.commands.Commands;
 
-@SuppressWarnings("removal")
 @Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
 public class ClientCommands {
 
@@ -61,8 +62,14 @@ public class ClientCommands {
                         )
                         .then(Commands.literal("modls")
                                 .executes(ctx -> {
-                                    ModsListScreen.returnToConfigScreen = false; // 独立打开，不返回配置界面
+                                    ModsListScreen.returnToConfigScreen = false;
                                     Minecraft.getInstance().setScreen(new ModsListScreen());
+                                    return 1;
+                                })
+                        )
+                        .then(Commands.literal("exitgame")
+                                .executes(ctx -> {
+                                    Minecraft.getInstance().stop();
                                     return 1;
                                 })
                         )
@@ -107,11 +114,14 @@ public class ClientCommands {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
 
-        mc.player.displayClientMessage(
-                Component.literal("[VerityConfig] 输入 /vc help 查看指令列表，或 /vc cs 打开配置界面。")
-                        .withStyle(ChatFormatting.YELLOW),
-                false
-        );
+        Component msg = Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal("输入 ").withStyle(ChatFormatting.WHITE))
+                .append(suggestCmd("/vc help", "点击填入命令"))
+                .append(Component.literal(" 查看指令列表，或 ").withStyle(ChatFormatting.WHITE))
+                .append(suggestCmd("/vc cs", "点击填入命令"))
+                .append(Component.literal(" 打开配置界面。").withStyle(ChatFormatting.WHITE));
+
+        mc.player.displayClientMessage(msg, false);
     }
 
     private static void showCommandList() {
@@ -119,32 +129,29 @@ public class ClientCommands {
         if (mc.player == null) return;
 
         mc.player.displayClientMessage(Component.literal("==== VerityConfig 指令 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
-        mc.player.displayClientMessage(Component.literal("/vc cs - 打开配置界面"), false);
-        mc.player.displayClientMessage(Component.literal("/vc help <主题> - 打开指定帮助主题"), false);
-        mc.player.displayClientMessage(Component.literal("/vc qanda - 查看常见问题解答"), false);
-        mc.player.displayClientMessage(Component.literal("/vc help - 查看此列表"), false);
-        mc.player.displayClientMessage(Component.literal("/vc modlist - 打开模组管理界面"), false);
-        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb - 管理 Verity 的记忆文件"), false);
-        mc.player.displayClientMessage(Component.literal("/vc verity mfix - 修复 Verity 的记忆文件"), false);
+        mc.player.displayClientMessage(suggestLine("/vc cs", "打开配置界面"), false);
+        mc.player.displayClientMessage(suggestLine("/vc modls", "打开模组管理界面"), false);
+        mc.player.displayClientMessage(suggestLine("/vc help", "查看此列表"), false);
+        mc.player.displayClientMessage(suggestLine("/vc qanda", "打开常见问题解答"), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mfix", "修复/管理 Verity 的记忆文件"), false);
     }
 
     private static void showMemoryRestoreList() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
 
-        mc.player.displayClientMessage(Component.literal("==== Verity 记忆备份恢复 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
-        mc.player.displayClientMessage(Component.literal("/vc verity mfix - 修复当前聊天记忆（移除空 AI 消息）"), false);
-        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb vcm - 恢复聊天记忆备份"), false);
-        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb vm - 恢复长期记忆备份"), false);
-        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb all - 恢复所有记忆备份"), false);
-        mc.player.displayClientMessage(Component.literal("/vc verity mfix rb del - 删除记忆文件（让 Verity 重新生成）"), false);
+        mc.player.displayClientMessage(Component.literal("==== Verity 记忆管理 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mfix", "修复当前聊天记忆（移除空 AI 消息）"), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb vcm", "恢复聊天记忆备份"), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb vm", "恢复长期记忆备份"), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb all", "恢复全部记忆备份"), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb del", "删除记忆文件（让 Verity 重新生成）"), false);
     }
 
     private static void openHelpTopic(String topic) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
 
-        // 检查帮助资源是否存在（Windows 和 Android 任意一个存在即可）
         String pcPath = "help/" + topic + "_pc.txt";
         String mobilePath = "help/" + topic + "_mobile.txt";
         boolean exists = doesResourceExist(pcPath) || doesResourceExist(mobilePath);
@@ -167,5 +174,21 @@ public class ClientCommands {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // ---------- 可点击填充命令的组件 ----------
+    private static Component suggestCmd(String command, String hover) {
+        return Component.literal(command)
+                .withStyle(style -> style
+                        .withColor(ChatFormatting.AQUA)
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, command))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(hover)))
+                );
+    }
+
+    private static Component suggestLine(String command, String desc) {
+        return suggestCmd(command, "点击填入命令")
+                .copy()
+                .append(Component.literal(" - " + desc).withStyle(ChatFormatting.GRAY));
     }
 }
