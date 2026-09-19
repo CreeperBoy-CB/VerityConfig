@@ -16,6 +16,7 @@ import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+@SuppressWarnings("removal")
 @Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
 public class ClientCommands {
 

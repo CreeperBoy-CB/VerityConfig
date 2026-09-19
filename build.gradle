@@ -9,6 +9,12 @@ plugins {
 version = mod_version
 group = mod_group_id
 
+// 模组描述在 build.gradle 中定义，而不是 gradle.properties：
+// Java 的 .properties 规范是 ISO-8859-1，Gradle 读取该文件时不会按 UTF-8 解码，
+// 直接写中文会在 processResources 阶段变成乱码。Groovy 源文件则按 UTF-8 编译，
+// 这里用 Unicode 转义可确保任何平台、任何默认编码下都得到正确的中文。
+ext.mod_description = '\u5728\u6E38\u620F\u5185\u914D\u7F6E Verity JE \u6A21\u7EC4\u7684 AI \u53C2\u6570\u3002\n\u5305\u542B AI \u914D\u7F6E\u3001\u9AD8\u7EA7\u8BBE\u7F6E\u3001\u6A21\u7EC4\u7BA1\u7406\u4E0E\u8BB0\u5FC6\u6587\u4EF6\u4FEE\u590D\u529F\u80FD\u3002'
+
 base {
     archivesName = "[Verity配置工具]verityconfig'${mod_version}'"
 }
@@ -158,7 +164,7 @@ tasks.named('processResources', ProcessResources).configure {
             forge_version: forge_version, forge_version_range: forge_version_range,
             loader_version_range: loader_version_range,
             mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: mod_version,
-            mod_authors: mod_authors, mod_description: mod_description,
+            mod_authors: mod_authors, mod_description: project.ext.mod_description,
     ]
     inputs.properties replaceProperties
 
