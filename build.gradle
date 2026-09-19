@@ -5,7 +5,8 @@ plugins {
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
 }
 
-version = 1.5
+// 版本号统一由 gradle.properties 的 mod_version 提供，避免与 mods.toml 不一致
+version = mod_version
 group = mod_group_id
 
 base {
@@ -204,3 +205,14 @@ publishing {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
 }
+
+// 源码和资源里都有中文。中文 Windows 上 JVM 默认 file.encoding=GBK，
+// 不显式指定会导致资源/字符串按 GBK 解读而乱码。
+tasks.withType(ProcessResources).configureEach {
+    filteringCharset = 'UTF-8'
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs '-Dfile.encoding=UTF-8'
+}
+

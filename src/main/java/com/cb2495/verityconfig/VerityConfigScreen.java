@@ -224,7 +224,9 @@ public class VerityConfigScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("完成"), btn -> {
             saveConfig();
             if (ModsListScreen.firstTimeSetup) {
-                ModsListScreen.firstTimeSetup = false;
+                // 注意：不要在这里把 firstTimeSetup 置回 false。
+                // ModsListScreen.init() 要靠它来决定是否执行首次自动启用模组，
+                // 提前清掉会导致自动启用永远不触发。
                 Minecraft.getInstance().setScreen(new ModsListScreen());
             } else {
                 showRestartConfirm();
@@ -379,16 +381,17 @@ public class VerityConfigScreen extends Screen {
                 ? customModelField.getValue().trim()
                 : selectedModel.name;
         data.think = thinkCheckbox.selected();
+        data.useTTS = false;
+        data.ttsProvider = "LOCAL";
 
-        if (!PlatformUtils.isWindows()) {
-            data.useTTS = false;
-            data.ttsProvider = "LOCAL";
-        } else {
-            String selectedTts = ttsProviderButton.getValue();
-            if ("NONE".equals(selectedTts)) {
-                data.useTTS = false;
-                data.ttsProvider = "LOCAL";
-            } else {
+        if (PlatformUtils.isWindows()) {
+            // 控件可能尚未创建（端点输入框在初始化期间就会触发一次保存），此时沿用已加载的配置
+            String selectedTts = ttsProviderButton != null
+                    ? ttsProviderButton.getValue()
+                    : (loadedConfig != null && loadedConfig.useTTS ? loadedConfig.ttsProvider : "NONE");
+            // Verity 只接受 NATIVE/LOCAL/GROQ/KOKORO/CARTESIA，NONE 与任何未知值都必须落回 LOCAL，
+            // 否则会写出无法解析的配置项
+            if ("NATIVE".equals(selectedTts) || "LOCAL".equals(selectedTts)) {
                 data.useTTS = true;
                 data.ttsProvider = selectedTts;
             }

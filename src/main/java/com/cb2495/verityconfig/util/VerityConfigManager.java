@@ -11,10 +11,21 @@ import java.nio.file.Path;
 import java.util.*;
 
 public class VerityConfigManager {
-    private static final Path CONFIG_FILE = Minecraft.getInstance().gameDirectory.toPath()
-            .resolve("config/verity-common.toml");
-    private static final Path TRANSLATE_CONFIG = Minecraft.getInstance().gameDirectory.toPath()
-            .resolve("config/simple_translate/simple_translate-client.json");
+
+    /**
+     * 配置文件路径。
+     * <p>必须延迟解析：写成 static final 字段会在类加载时就去读
+     * {@code Minecraft.getInstance().gameDirectory}，而类加载时机不可控
+     * （可能早于 Minecraft 实例创建），从而拿到 null 或直接抛异常。
+     */
+    private static Path configFile() {
+        return Minecraft.getInstance().gameDirectory.toPath().resolve("config/verity-common.toml");
+    }
+
+    private static Path translateConfig() {
+        return Minecraft.getInstance().gameDirectory.toPath()
+                .resolve("config/simple_translate/simple_translate-client.json");
+    }
 
     // 提供商 → 端点映射
     private static final Map<String, String> PROVIDER_ENDPOINTS = new LinkedHashMap<>();
@@ -75,7 +86,7 @@ public class VerityConfigManager {
     // ========== 读取 verity-common.toml ==========
     public static ConfigData loadVerityConfig() {
         ConfigData data = new ConfigData();
-        List<String> lines = ConfigFileUtils.readLines(CONFIG_FILE);
+        List<String> lines = ConfigFileUtils.readLines(configFile());
         for (String line : lines) {
             line = line.trim();
             if (ConfigFileUtils.lineMatchesKey(line, "apiKey")) data.apiKey = ConfigFileUtils.extractStringValue(line);
@@ -96,7 +107,8 @@ public class VerityConfigManager {
 
     // ========== 保存 verity-common.toml ==========
     public static void saveVerityConfig(ConfigData data) {
-        List<String> lines = ConfigFileUtils.readLines(CONFIG_FILE);
+        java.nio.file.Path file = configFile();
+        List<String> lines = ConfigFileUtils.readLines(file);
         ConfigFileUtils.replaceOrAddString(lines, "apiKey", data.apiKey);
         ConfigFileUtils.replaceOrAddString(lines, "aiEndpoint", data.endpoint);
         ConfigFileUtils.replaceOrAddString(lines, "aiModel", data.model);
@@ -104,14 +116,15 @@ public class VerityConfigManager {
         ConfigFileUtils.replaceOrAddRaw(lines, "useTTS", String.valueOf(data.useTTS));
         ConfigFileUtils.replaceOrAddString(lines, "ttsProvider", data.ttsProvider);
         ConfigFileUtils.replaceOrAddString(lines, "aiProvider", "OPENAI");
-        ConfigFileUtils.writeLines(CONFIG_FILE, lines);
+        ConfigFileUtils.writeLines(file, lines);
     }
 
     // ========== 同步到 simple_translate 配置 ==========
     public static void saveSimpleTranslateConfig(String provider, String apiKey, String endpoint, String model) {
-        if (!java.nio.file.Files.exists(TRANSLATE_CONFIG)) return;
+        java.nio.file.Path file = translateConfig();
+        if (!java.nio.file.Files.exists(file)) return;
         try {
-            String content = java.nio.file.Files.readString(TRANSLATE_CONFIG).trim();
+            String content = java.nio.file.Files.readString(file).trim();
             JsonElement root;
             try {
                 root = JsonParser.parseString(content);
@@ -126,7 +139,7 @@ public class VerityConfigManager {
             json.addProperty("api.apiUrl", apiUrl);
             json.addProperty("api.format", getApiFormatForProvider(provider));
             json.addProperty("shortcuts.translateGui", "keyboard:262:0"); // 保留原键位
-            try (FileWriter writer = new FileWriter(TRANSLATE_CONFIG.toFile())) {
+            try (FileWriter writer = new FileWriter(file.toFile())) {
                 new GsonBuilder().setPrettyPrinting().create().toJson(json, writer);
             }
         } catch (Exception e) {

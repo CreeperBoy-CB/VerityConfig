@@ -21,7 +21,8 @@ import java.util.regex.Pattern;
 
 public class ModsListScreen extends Screen {
 
-    public static String modpackVersion = "6.4";
+    // 默认值直接取自 VerityConfig.MODPACK_VERSION，避免两处版本号不一致
+    public static String modpackVersion = VerityConfig.MODPACK_VERSION;
     public static String verityVersion = "未知";
     public static String configModVersion = "未知";
     public static boolean firstTimeSetup = false;
@@ -138,9 +139,13 @@ public class ModsListScreen extends Screen {
     private final List<ModEntry> mods = new ArrayList<>();
     private static final int ITEM_HEIGHT = 20;
     private static final int CHECKBOX_SIZE = 12;
-    private static final int LIST_TOP = 64;
     private static final int FILTER_ROW_Y = 27;
     private static final int FILTER_CHECKBOX_SIZE = 10;
+    // 顶部遮罩下边界：包住标题、按钮、版本信息与筛选行即可，
+    // 之前直接用 LIST_TOP-1 会在筛选行下方留下一大块空白
+    private static final int HEADER_HEIGHT = FILTER_ROW_Y + FILTER_CHECKBOX_SIZE + 3;
+    // 列表从表头下方紧接着开始，与遮罩之间只留一点缝隙
+    private static final int LIST_TOP = HEADER_HEIGHT + 2;
 
     private Button doneButton;
     private Button moreModsButton;
@@ -250,8 +255,12 @@ public class ModsListScreen extends Screen {
     protected void init() {
         VerityConfig.loadVersions();
 
+        // 只在「首次启动配置流程」里自动启用模组
+        // （WelcomeScreen -> VerityConfigScreen 的「完成」 -> 这里）。
+        // 从 /vc modls、配置页的「配置模组」按钮等入口进来时不应改动用户的模组开关。
         if (firstTimeSetup) {
             enableAutoMods();
+            firstTimeSetup = false; // 只执行一次，避免后续进入重复触发
         }
         loadModList();
 
@@ -553,8 +562,9 @@ public class ModsListScreen extends Screen {
             }
         }
 
-        graphics.fill(0, 0, this.width, listTop - 1, 0xBF000000);
-        graphics.fill(0, listTop - 1, this.width, listTop, 0xFFAAAAAA);
+        // 顶部遮罩只包住表头内容，下方直接露出列表（列表会滚动到遮罩下面）
+        graphics.fill(0, 0, this.width, HEADER_HEIGHT - 1, 0xBF000000);
+        graphics.fill(0, HEADER_HEIGHT - 1, this.width, HEADER_HEIGHT, 0xFFAAAAAA);
 
         graphics.drawString(this.font, "模组管理 (" + mods.size() + ")", 5, 4, 0xFFFFFF, false);
 
