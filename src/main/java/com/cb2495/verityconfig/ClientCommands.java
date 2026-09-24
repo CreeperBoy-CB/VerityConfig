@@ -80,28 +80,12 @@ public class ClientCommands {
                                             VerityMemoryManager.fix();
                                             return 1;
                                         })
-                                        .then(Commands.literal("rb")
-                                                .executes(ctx -> {
-                                                    showMemoryRestoreList();
-                                                    return 1;
-                                                })
-                                                .then(Commands.literal("vcm").executes(ctx -> {
-                                                    VerityMemoryManager.restore("vcm");
-                                                    return 1;
-                                                }))
-                                                .then(Commands.literal("vm").executes(ctx -> {
-                                                    VerityMemoryManager.restore("vm");
-                                                    return 1;
-                                                }))
-                                                .then(Commands.literal("all").executes(ctx -> {
-                                                    VerityMemoryManager.restore("all");
-                                                    return 1;
-                                                }))
-                                                .then(Commands.literal("del").executes(ctx -> {
-                                                    VerityMemoryManager.delete();
-                                                    return 1;
-                                                }))
-                                        )
+                                )
+                                .then(Commands.literal("mdel")
+                                        .executes(ctx -> {
+                                            VerityMemoryManager.delete();
+                                            return 1;
+                                        })
                                 )
                         )
         );
@@ -134,19 +118,8 @@ public class ClientCommands {
         mc.player.displayClientMessage(suggestLine("/vc modls", "打开模组管理界面"), false);
         mc.player.displayClientMessage(suggestLine("/vc help", "查看此列表"), false);
         mc.player.displayClientMessage(suggestLine("/vc qanda", "打开常见问题解答"), false);
-        mc.player.displayClientMessage(suggestLine("/vc verity mfix", "修复/管理 Verity 的记忆文件"), false);
-    }
-
-    private static void showMemoryRestoreList() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-
-        mc.player.displayClientMessage(Component.literal("==== Verity 记忆管理 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
-        mc.player.displayClientMessage(suggestLine("/vc verity mfix", "修复当前聊天记忆（移除空 AI 消息）"), false);
-        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb vcm", "恢复聊天记忆备份"), false);
-        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb vm", "恢复长期记忆备份"), false);
-        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb all", "恢复全部记忆备份"), false);
-        mc.player.displayClientMessage(suggestLine("/vc verity mfix rb del", "删除记忆文件（让 Verity 重新生成）"), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mfix", "修复 Verity 的聊天记忆（移除空 AI 消息）"), false);
+        mc.player.displayClientMessage(suggestLine("/vc verity mdel", "删除记忆文件（让 Verity 重新生成）"), false);
     }
 
     private static void openHelpTopic(String topic) {

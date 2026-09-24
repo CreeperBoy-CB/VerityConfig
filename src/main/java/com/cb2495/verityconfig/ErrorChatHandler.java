@@ -1,7 +1,6 @@
 package com.cb2495.verityconfig;
 
 import com.cb2495.verityconfig.util.VerityConfigManager;
-import com.cb2495.verityconfig.util.VerityMemoryManager;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.ChatFormatting;
@@ -32,9 +31,6 @@ public class ErrorChatHandler {
 
         String text = message.getString();
         if (!text.contains("ERROR")) return;
-
-        // 检测到错误，取消待执行的备份，避免坏文件覆盖好备份
-        VerityMemoryManager.cancelPending();
 
         // 提取 JSON
         String jsonPart = extractJson(text);
@@ -161,16 +157,12 @@ public class ErrorChatHandler {
                 Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("记忆文件错误，可以尝试 ").withStyle(ChatFormatting.WHITE))
                         .append(suggestCmd("/vc verity mfix", "点击填入命令"))
-                        .append(Component.literal(" 修复，或 ").withStyle(ChatFormatting.WHITE))
-                        .append(suggestCmd("/vc verity mfix rb vcm", "点击填入命令"))
-                        .append(Component.literal(" 恢复聊天记忆备份。").withStyle(ChatFormatting.WHITE))
+                        .append(Component.literal(" 修复聊天记忆。").withStyle(ChatFormatting.WHITE))
         );
         pendingComponents.add(
                 Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("如果仍不起作用，可使用 ").withStyle(ChatFormatting.WHITE))
-                        .append(suggestCmd("/vc verity mfix rb all", "点击填入命令"))
-                        .append(Component.literal(" 恢复全部备份，或 ").withStyle(ChatFormatting.WHITE))
-                        .append(suggestCmd("/vc verity mfix rb del", "点击填入命令"))
+                        .append(suggestCmd("/vc verity mdel", "点击填入命令"))
                         .append(Component.literal(" 删除记忆文件让 Verity 重新生成。").withStyle(ChatFormatting.WHITE))
         );
         pendingTicks = 2;
