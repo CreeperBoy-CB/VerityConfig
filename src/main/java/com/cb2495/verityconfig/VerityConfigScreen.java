@@ -1,7 +1,6 @@
 package com.cb2495.verityconfig;
 
 import com.cb2495.verityconfig.util.PlatformUtils;
-import com.cb2495.verityconfig.util.SponsorUtils;
 import com.cb2495.verityconfig.util.VerityConfigManager;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.ChatFormatting;
@@ -91,10 +90,6 @@ public class VerityConfigScreen extends Screen {
     private boolean sponsorTextureLoaded = false;
     private boolean sponsorExpanded = false;
     private Button sponsorButton;
-
-    // 图片显示区域与悬停状态
-    private int sponsorImageX, sponsorImageY, sponsorImageWidth, sponsorImageHeight;
-    private boolean isHoveringSponsorImage = false;
 
     public VerityConfigScreen() {
         super(Component.literal("Verity AI 配置"));
@@ -415,11 +410,6 @@ public class VerityConfigScreen extends Screen {
             int x = this.width - guiWidth - 5;
             int y = this.height / 2 - guiHeight / 2;
 
-            sponsorImageX = x;
-            sponsorImageY = y;
-            sponsorImageWidth = guiWidth;
-            sponsorImageHeight = guiHeight;
-
             float scaleX = (float) guiWidth / sponsorTexWidth;
             float scaleY = (float) guiHeight / sponsorTexHeight;
             graphics.pose().pushPose();
@@ -427,26 +417,10 @@ public class VerityConfigScreen extends Screen {
             graphics.pose().scale(scaleX, scaleY, 1.0f);
             graphics.blit(sponsorTexture, 0, 0, 0, 0, sponsorTexWidth, sponsorTexHeight, sponsorTexWidth, sponsorTexHeight);
             graphics.pose().popPose();
-
-            isHoveringSponsorImage = mouseX >= x && mouseX <= x + guiWidth && mouseY >= y && mouseY <= y + guiHeight;
-            if (isHoveringSponsorImage) {
-                graphics.renderTooltip(this.font, Component.literal("点击可保存至本地"), mouseX, mouseY);
-            }
-        } else {
-            isHoveringSponsorImage = false;
         }
 
         updateSponsorButtonText();
         super.render(graphics, mouseX, mouseY, partialTick);
-    }
-
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0 && isHoveringSponsorImage) {
-            SponsorUtils.openSaveDialog();
-            return true;
-        }
-        return super.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override

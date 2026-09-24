@@ -1,6 +1,5 @@
 package com.cb2495.verityconfig;
 
-import com.cb2495.verityconfig.util.SponsorUtils;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -22,10 +21,6 @@ public class SponsorScreen extends Screen {
     private ResourceLocation loadedTexture;
     private int imageWidth, imageHeight;   // 原始像素尺寸
     private boolean loadFailed = false;
-
-    // 图片显示区域与悬停状态
-    private int imageX, imageY, displayWidth, displayHeight;
-    private boolean isHoveringImage = false;
 
     public SponsorScreen() {
         super(Component.literal("赞助"));
@@ -86,11 +81,6 @@ public class SponsorScreen extends Screen {
             int x = (this.width - guiWidth) / 2;
             int y = 30 + (maxGuiHeight - guiHeight) / 2;
 
-            imageX = x;
-            imageY = y;
-            displayWidth = guiWidth;
-            displayHeight = guiHeight;
-
             float scaleX = (float) guiWidth / imageWidth;
             float scaleY = (float) guiHeight / imageHeight;
             graphics.pose().pushPose();
@@ -98,26 +88,11 @@ public class SponsorScreen extends Screen {
             graphics.pose().scale(scaleX, scaleY, 1.0f);
             graphics.blit(loadedTexture, 0, 0, 0, 0, imageWidth, imageHeight, imageWidth, imageHeight);
             graphics.pose().popPose();
-
-            isHoveringImage = mouseX >= x && mouseX <= x + guiWidth && mouseY >= y && mouseY <= y + guiHeight;
-            if (isHoveringImage) {
-                graphics.renderTooltip(this.font, Component.literal("点击可保存至本地"), mouseX, mouseY);
-            }
         } else {
-            isHoveringImage = false;
             graphics.drawCenteredString(this.font, "图片加载失败", this.width / 2, this.height / 2 - 10, 0xFF5555);
         }
 
         super.render(graphics, mouseX, mouseY, partialTick);
-    }
-
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0 && isHoveringImage) {
-            SponsorUtils.openSaveDialog();
-            return true;
-        }
-        return super.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override
