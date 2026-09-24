@@ -32,7 +32,8 @@ public class VerityConfigScreen extends Screen {
     private static final Map<String, List<ModelOption>> PROVIDER_MODELS = new LinkedHashMap<>();
     static {
         PROVIDER_MODELS.put("DeepSeek", Arrays.asList(
-                new ModelOption("deepseek-flash", "低价")
+                new ModelOption("deepseek-flash", "低价、快速"),
+                new ModelOption("deepseek-v4-pro", "深度思考，旗舰")
         ));
         PROVIDER_MODELS.put("智谱 (GLM)", Arrays.asList(
                 new ModelOption("glm-4-flash", "免费、文本生成"),
