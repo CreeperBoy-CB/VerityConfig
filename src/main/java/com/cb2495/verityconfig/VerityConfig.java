@@ -1,5 +1,6 @@
 package com.cb2495.verityconfig;
 
+import com.cb2495.verityconfig.util.ModConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
@@ -27,6 +28,10 @@ public class VerityConfig {
 
     private void onClientSetup(FMLClientSetupEvent event) {
         MinecraftForge.EVENT_BUS.register(this);
+        // 首次启动时生成默认配置，让玩家能在 config 目录里直接看到可改的选项。
+        // 用 enqueueWork 切回主线程：FMLClientSetupEvent 在并行线程上触发，
+        // 此时直接取 Minecraft 实例可能拿到未初始化完成的 gameDirectory。
+        event.enqueueWork(ModConfig::createDefaultIfMissing);
     }
 
     @SubscribeEvent

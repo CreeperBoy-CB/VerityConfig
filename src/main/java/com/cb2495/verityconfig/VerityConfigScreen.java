@@ -1,5 +1,6 @@
 package com.cb2495.verityconfig;
 
+import com.cb2495.verityconfig.util.ModConfig;
 import com.cb2495.verityconfig.util.PlatformUtils;
 import com.cb2495.verityconfig.util.VerityConfigManager;
 import com.mojang.blaze3d.platform.NativeImage;
@@ -103,7 +104,8 @@ public class VerityConfigScreen extends Screen {
         int startY = h / 2 - 70;
 
         loadSponsorTexture();
-        sponsorExpanded = isSponsorSpaceSufficient();
+        // 由配置决定是否显示：ShowSponsor 为 false 时永不展开，即使空间足够
+        sponsorExpanded = ModConfig.isShowSponsor() && isSponsorSpaceSufficient();
 
         loadedConfig = VerityConfigManager.loadVerityConfig();
         selectedProvider = VerityConfigManager.inferProviderFromEndpoint(loadedConfig.endpoint, selectedProvider);
@@ -229,19 +231,16 @@ public class VerityConfigScreen extends Screen {
             }
         }).pos(w / 2 - 50, saveButtonY).size(100, 20).build());
 
-        // 9. 右上角按钮：赞助作者 + 高级设置
-        this.sponsorButton = Button.builder(Component.literal(sponsorExpanded ? "收起" : "赞助作者"), btn -> {
-            if (sponsorExpanded) {
-                sponsorExpanded = false;
-                btn.setMessage(Component.literal("赞助作者"));
-            } else {
-                if (isSponsorSpaceSufficient()) {
-                    sponsorExpanded = true;
-                    btn.setMessage(Component.literal("收起"));
-                } else {
-                    Minecraft.getInstance().setScreen(new SponsorScreen());
-                }
+        // 9. 右上角按钮：赞助码展开/收起 + 高级设置
+        this.sponsorButton = Button.builder(sponsorButtonLabel(), btn -> {
+            if (!isSponsorSpaceSufficient()) {
+                // 空间不足，无法内嵌显示，改为跳转全屏页，不改动配置
+                Minecraft.getInstance().setScreen(new SponsorScreen());
+                return;
             }
+            sponsorExpanded = !sponsorExpanded;
+            ModConfig.setShowSponsor(sponsorExpanded);
+            btn.setMessage(sponsorButtonLabel());
         }).pos(this.width - 155, 5).size(70, 20).build();
         this.addRenderableWidget(this.sponsorButton);
 
@@ -277,9 +276,22 @@ public class VerityConfigScreen extends Screen {
                 Component.literal("配置已保存，是否重启游戏？")));
     }
 
+    /**
+     * 按钮文案分三种情况：
+     * <ul>
+     *   <li>空间不足：显示「赞助作者」，点击跳转全屏页；</li>
+     *   <li>空间足够且已展开：显示「收起赞助码」；</li>
+     *   <li>空间足够但已收起：显示「展开赞助码」。</li>
+     * </ul>
+     */
+    private Component sponsorButtonLabel() {
+        if (!isSponsorSpaceSufficient()) return Component.literal("赞助作者");
+        return Component.literal(sponsorExpanded ? "收起赞助码" : "展开赞助码");
+    }
+
     private void updateSponsorButtonText() {
         if (sponsorButton != null) {
-            sponsorButton.setMessage(Component.literal(sponsorExpanded ? "收起" : "赞助作者"));
+            sponsorButton.setMessage(sponsorButtonLabel());
         }
     }
 
