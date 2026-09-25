@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
 @Mod(VerityConfig.MODID)
 public class VerityConfig {
     public static final String MODID = "verityconfig";
-    public static final String MODPACK_VERSION = "7.0"; // 整合包版本，可修改
+    public static final String MODPACK_VERSION = "6.7"; // 整合包版本，可修改
 
     public VerityConfig() {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onClientSetup);
