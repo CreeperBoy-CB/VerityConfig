@@ -79,25 +79,6 @@ public class ModsListScreen extends Screen {
         return PlatformUtils.isWindows() || !WINDOWS_ONLY_BRACKETS.contains(bracketText);
     }
 
-    /** 在非 Windows 端点了仅 Windows 可用的模组时给出说明，避免用户以为是按钮失效。 */
-    private void sendPlatformUnsupportedHint(String bracketText) {
-        sendChatMessage("「" + bracketText + "」仅支持 Windows，当前平台无法启用");
-    }
-
-    /** 发送一条聊天栏提示；无玩家时改用物品栏提示，两者都不可用时只记日志。 */
-    private void sendChatMessage(String text) {
-        Component message = Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
-                .append(Component.literal(text).withStyle(ChatFormatting.WHITE));
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) {
-            mc.player.displayClientMessage(message, false);
-        } else if (mc.gui != null) {
-            mc.gui.setOverlayMessage(message, false);
-        } else {
-            System.out.println("[VerityConfig] " + text);
-        }
-    }
-
     private static final Map<String, List<String>> MOD_DEPENDENCIES = new HashMap<>();
     static {
         MOD_DEPENDENCIES.put("Sodium Options API", Arrays.asList("Embeddium"));
@@ -181,12 +162,143 @@ public class ModsListScreen extends Screen {
     // 列表从表头下方紧接着开始，与遮罩之间只留一点缝隙
     private static final int LIST_TOP = HEADER_HEIGHT + 2;
 
+    /** 条目实际绘制高度：背景与红框都只画到 ITEM_HEIGHT - 2，预留 2px 行距。 */
+    private static final int ITEM_VISUAL_HEIGHT = ITEM_HEIGHT - 2;
+
+    /**
+     * 勾选框在条目内的 y 偏移。
+     * <p>垂直居中要基于「实际绘制高度」而非 ITEM_HEIGHT：
+     * 用 ITEM_HEIGHT 会算成 (20-12)/2=4，导致上方留白 4px、下方仅 2px，视觉偏下一像素。
+     * 渲染与点击检测共用本方法，避免两处公式不一致。
+     */
+    private static int checkboxOffsetY() {
+        return (ITEM_VISUAL_HEIGHT - CHECKBOX_SIZE) / 2;
+    }
+
     private Button doneButton;
     private Button moreModsButton;
     private final List<Button> tabButtons = new ArrayList<>();
 
     private ScrollableArea scrollableArea;
     private boolean draggingScrollbar = false;
+
+    /** 平台不支持提示的显示时长与淡出时长（毫秒）。 */
+    private static final long REJECT_HINT_HOLD_MS = 2500;
+    private static final long REJECT_HINT_FADE_MS = 500;
+
+    /** 晃动幅度（像素）与单次完整往复的周期（毫秒）。 */
+    private static final float REJECT_SHAKE_AMPLITUDE = 6f;
+    private static final long REJECT_SHAKE_PERIOD_MS = 180;
+
+    /**
+     * 晃动衰减到 0 所需的时间（毫秒）。
+     * <p>幅度随时间<b>连续</b>线性衰减，而不是每 100ms 硬减 1px。
+     * <p>阶梯写法（{@code 6f - elapsed/100 * 1f}）会在每个 100ms 边界
+     * 让幅度瞬间掉 1px；该边界与 180ms 的正弦周期不同步，相位对齐时
+     * 合成位移会在相邻两帧间突跳 3px，肉眼即「画面抖了一下」。
+     * 连续衰减没有这个不连续点，因此不会出现偶发跳变。
+     */
+    private static final long REJECT_SHAKE_DURATION_MS = 600;
+
+    /** 被拒绝启用的模组名，以及拒绝发生的时间戳；-1 表示当前没有提示。 */
+    private String rejectedBracket = null;
+    private long rejectedAt = -1;
+
+    /** 记录一次「因平台限制无法启用」，让对应条目边框变红并在右侧显示原因。 */
+    private void showPlatformReject(String bracketText) {
+        // 报错后的 REJECT_IGNORE_CLICK_MS 内所有点击都会被忽略（见 mouseClicked），
+        // 正常不会走到这里；若真被调用，只刷新起始时间，不叠加幅度或时长。
+        this.rejectedBracket = bracketText;
+        this.rejectedAt = System.currentTimeMillis();
+    }
+
+    /**
+     * 忽略点击的总时长（毫秒）：从报错那一刻起，
+     * 这段时间内<b>被警告的那一项</b>的点击不生效。
+     * <p>必须<b>大于</b> {@link #REJECT_HINT_HOLD_MS} + {@link #REJECT_HINT_FADE_MS}，
+     * 并覆盖到 {@link #clearRejectIfExpired()} 真正清空状态的时刻。
+     * <p>否则会出现漏洞窗口：淡出结束后点击被警告项会走到
+     * {@link #showPlatformReject} 重置计时，提示一直不消失。
+     */
+    private static final long REJECT_IGNORE_CLICK_MS = 3250;
+
+    /**
+     * 当前是否处于「忽略点击」窗口内，用于判断某个条目的点击要不要吞掉。
+     * <p>只依据时间戳判断，不要求 {@code rejectedBracket} 仍非空，
+     * 因此状态清除前后都连续生效，没有边界缝隙。
+     * <p>调用方必须再比对条目名，否则会连其他模组一起锁住。
+     */
+    private boolean rejectClicksIgnored() {
+        return rejectedAt >= 0
+                && System.currentTimeMillis() - rejectedAt < REJECT_IGNORE_CLICK_MS;
+    }
+
+    /** 提示是否仍在显示（含淡出阶段）。 */
+    private boolean rejectHintVisible() {
+        return rejectedBracket != null && rejectedAt >= 0
+                && System.currentTimeMillis() - rejectedAt
+                        < REJECT_HINT_HOLD_MS + REJECT_HINT_FADE_MS;
+    }
+
+    /**
+     * 当前应显示的拒绝提示不透明度（0~1）；没有提示或已超过显示时长时返回 0。
+     * <p>最后一段做线性淡出，避免提示突然消失。
+     * <p>本方法<b>只读</b>，不修改任何状态。之前版本在超时后顺手清空
+     * {@code rejectedBracket}/{@code rejectedAt}，导致同一帧内
+     * {@link #rejectShakeOffset()} 读到的值与这里不一致；
+     * 清除统一交给 {@link #clearRejectIfExpired()}。
+     */
+    private float rejectHintAlpha() {
+        if (rejectedBracket == null || rejectedAt < 0) return 0f;
+        long elapsed = System.currentTimeMillis() - rejectedAt;
+        if (elapsed >= REJECT_HINT_HOLD_MS + REJECT_HINT_FADE_MS) return 0f;
+        if (elapsed <= REJECT_HINT_HOLD_MS) return 1f;
+        return 1f - (float) (elapsed - REJECT_HINT_HOLD_MS) / REJECT_HINT_FADE_MS;
+    }
+
+    /** 状态清除的宽限期：淡出到 0 之后再多留一会儿，避免临界帧反复切换。 */
+    private static final long REJECT_CLEAR_GRACE_MS = 200;
+
+    /** 提示彻底结束后清除状态，避免残留影响后续点击。 */
+    private void clearRejectIfExpired() {
+        if (rejectedAt >= 0
+                && System.currentTimeMillis() - rejectedAt
+                        >= REJECT_HINT_HOLD_MS + REJECT_HINT_FADE_MS + REJECT_CLEAR_GRACE_MS) {
+            rejectedBracket = null;
+            rejectedAt = -1;
+        }
+    }
+
+    /** 把 0~1 的不透明度应用到 ARGB 颜色上。 */
+    private static int withAlpha(int argb, float alpha) {
+        int a = (int) (((argb >>> 24) & 0xFF) * alpha);
+        return (a << 24) | (argb & 0x00FFFFFF);
+    }
+
+    /**
+     * 提示期间的水平晃动偏移（像素）。
+     * <p>用正弦函数产生左右往复，幅度在 {@link #REJECT_SHAKE_DURATION_MS}
+     * 内<b>连续</b>线性衰减到 0。
+     * <p>与文字淡出相互独立：抖动先停，文字后消失。
+     * <p>计时基准是 {@link #rejectedAt}，与提示文字同源，因此两者不会失步。
+     */
+    private float rejectShakeOffset() {
+        if (rejectedAt < 0) return 0f;
+        long elapsed = System.currentTimeMillis() - rejectedAt;
+        if (elapsed >= REJECT_SHAKE_DURATION_MS) return 0f;
+
+        // 连续衰减：每帧的变化量都很小，不会出现阶梯写法那种
+        // 「某一帧幅度突然少 1px」的不连续点
+        float amplitude = REJECT_SHAKE_AMPLITUDE
+                * (1f - (float) elapsed / REJECT_SHAKE_DURATION_MS);
+        double phase = (double) elapsed / REJECT_SHAKE_PERIOD_MS * Math.PI * 2;
+        return (float) Math.sin(phase) * amplitude;
+    }
+
+    /** 平台不支持时显示在条目右侧的说明文字。 */
+    private static Component platformRejectHint() {
+        return Component.literal("安卓设备暂不支持该模组");
+    }
 
     public ModsListScreen() {
         super(Component.literal("模组管理"));
@@ -431,7 +543,7 @@ public class ModsListScreen extends Screen {
                 }
             }
             if (!canEnableOnThisPlatform(entry.bracketText)) {
-                sendPlatformUnsupportedHint(entry.bracketText);
+                showPlatformReject(entry.bracketText);
                 return;
             }
             File target = new File(source.getParentFile(), name.substring(0, name.length() - ".disabled".length()));
@@ -540,20 +652,54 @@ public class ModsListScreen extends Screen {
         int scrollOffset = scrollableArea.getScrollOffset();
         int maxVisible = scrollableArea.getMaxVisible();
 
+        // 先清理已结束的提示，再取值：rejectHintAlpha() 只读，状态清除单独进行，
+        // 否则同一帧内后续读取到的值与判断依据会不一致。
+        // 每帧只求值一次并缓存，保证同一帧内所有条目用同一个 alpha
+        clearRejectIfExpired();
+        float rejectAlpha = rejectHintAlpha();
+        String rejectedName = rejectedBracket;
+
         for (int i = 0; i < maxVisible && scrollOffset / ITEM_HEIGHT + i < filteredMods.size(); i++) {
             int index = scrollOffset / ITEM_HEIGHT + i;
             ModEntry entry = filteredMods.get(index);
             int y = listTop + i * ITEM_HEIGHT;
 
             int bgColor = (i % 2 == 0) ? 0x80000000 : 0x88000000;
-            graphics.fill(left, y, right, y + ITEM_HEIGHT - 2, bgColor);
+            graphics.fill(left, y, right, y + ITEM_VISUAL_HEIGHT, bgColor);
+
+            // 平台不支持时该条目边框变红，并在右侧显示原因，提示会自动淡出
+            boolean rejected = rejectAlpha > 0f
+                    && entry.bracketText.equals(rejectedName);
+            if (rejected) {
+                graphics.renderOutline(left, y, right - left, ITEM_VISUAL_HEIGHT,
+                        withAlpha(0xFFFF5555, rejectAlpha));
+            }
 
             int cbX = left + 4;
-            int cbY = y + (ITEM_HEIGHT - CHECKBOX_SIZE) / 2;
+            int cbY = y + checkboxOffsetY();
             graphics.renderOutline(cbX, cbY, CHECKBOX_SIZE, CHECKBOX_SIZE, 0xFFAAAAAA);
             if (!entry.disabled) {
                 graphics.fill(cbX + 2, cbY + 2, cbX + CHECKBOX_SIZE - 2, cbY + CHECKBOX_SIZE - 2, 0xFFFFFFFF);
             }
+
+            // 被拒绝的条目：红色警告淡出，原信息同步淡入。
+            // 关键：normalAlpha 只在 rejected 为真时才降低，
+            // 若写成「全屏共用的 1 - rejectAlpha」，警告满不透明时
+            // normalAlpha 会变成 0，导致所有正常条目被一起跳过、整页消失。
+            float normalAlpha = rejected ? 1f - rejectAlpha : 1f;
+
+            if (rejected) {
+                Component hint = platformRejectHint();
+                float shake = rejectShakeOffset();
+                int hintX = cbX + CHECKBOX_SIZE + 6 + (int) shake;
+                int hintY = y + (ITEM_VISUAL_HEIGHT - 8) / 2;
+                graphics.drawString(this.font, hint, hintX, hintY,
+                        withAlpha(0xFFFF5555, rejectAlpha), false);
+            }
+
+            // 原信息：完全透明时才跳过，避免无谓绘制。
+            // 交叉淡入保证淡出期间整行始终有内容，不会闪空白
+            if (normalAlpha <= 0f) continue;
 
             int textX = left + 20;
             int firstLineY = y + 1;
@@ -564,7 +710,8 @@ public class ModsListScreen extends Screen {
                         .withColor(entry.disabled ? 0xFF888888 : 0xFFFFFFFF)
                         .withStrikethrough(entry.disabled);
                 Component bracketComp = Component.literal(entry.bracketText).setStyle(bracketStyle);
-                graphics.drawString(this.font, bracketComp, x, firstLineY, 0xFFFFFFFF, false);
+                graphics.drawString(this.font, bracketComp, x, firstLineY,
+                        withAlpha(0xFFFFFFFF, normalAlpha), false);
                 x += this.font.width(entry.bracketText) + 4;
             }
 
@@ -573,7 +720,7 @@ public class ModsListScreen extends Screen {
                 graphics.pose().translate(x, firstLineY + 2, 0);
                 graphics.pose().scale(0.5f, 0.5f, 1.0f);
                 Component bareComp = Component.literal(entry.bareName).setStyle(Style.EMPTY.withColor(0xFFAAAAAA));
-                graphics.drawString(this.font, bareComp, 0, 0, 0xFFAAAAAA, false);
+                graphics.drawString(this.font, bareComp, 0, 0, withAlpha(0xFFAAAAAA, normalAlpha), false);
                 graphics.pose().popPose();
             }
 
@@ -583,7 +730,8 @@ public class ModsListScreen extends Screen {
             }
             if (!secondLineText.isEmpty()) {
                 Component secondLineComp = Component.literal(secondLineText).setStyle(Style.EMPTY.withColor(0xFFAAAAAA));
-                graphics.drawString(this.font, secondLineComp, textX, y + 9, 0xFFAAAAAA, false);
+                graphics.drawString(this.font, secondLineComp, textX, y + 9,
+                        withAlpha(0xFFAAAAAA, normalAlpha), false);
             }
 
             if (entry.bracketText.equals("Oculus")) {
@@ -713,9 +861,15 @@ public class ModsListScreen extends Screen {
                 ModEntry entry = filteredMods.get(index);
                 int y = LIST_TOP + i * ITEM_HEIGHT;
                 int cbX = 2 + 4;
-                int cbY = y + (ITEM_HEIGHT - CHECKBOX_SIZE) / 2;
+                int cbY = y + checkboxOffsetY();
                 if (mouseX >= cbX && mouseX <= cbX + CHECKBOX_SIZE &&
                         mouseY >= cbY && mouseY <= cbY + CHECKBOX_SIZE) {
+                    // 只忽略「正在报错的那一项」的点击：重复点它会重置 rejectedAt，
+                    // 让计时从头开始、提示一直不消失。
+                    // 其他模组、过滤器、标签页、滚动条都不受影响。
+                    if (rejectClicksIgnored() && entry.bracketText.equals(rejectedBracket)) {
+                        return true;
+                    }
                     toggleMod(entry);
                     return true;
                 }
