@@ -1,0 +1,14 @@
+§1:"使用准备"
+首先你需要确认你的电脑支持触摸屏，如果你的电脑没有触摸屏安装该模组无效
+<winsettings.png>
+§2:"模组配置"
+1.在游戏内点击上方的暂停键
+<mc_pause.png>
+2.点击模组（Mod）
+<mc_enter_mods.png>
+3.找到TouchController模组，选中后点击配置
+<mc_enter_tc_config.png>
+随后即可配置该模组
+§3:"其他问题"
+如果你对这个模组的一些内容仍有疑问
+请/url/点击这里|https://tcwiki.fifthlight.top/manual/quickstart.html/url/查看该模组的官方文档

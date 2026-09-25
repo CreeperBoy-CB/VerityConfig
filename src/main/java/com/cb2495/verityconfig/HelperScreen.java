@@ -8,9 +8,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.ConfirmLinkScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.resources.ResourceLocation;
@@ -89,6 +92,22 @@ public class HelperScreen extends Screen {
     private static final int CONTENT_TOP = 30;
     private static final int CONTENT_BOTTOM_OFFSET = 10;
 
+    /** 文本起始 x 坐标，渲染与点击检测共用，避免两处写死后不一致。 */
+    private static final int TEXT_LEFT = 10;
+
+    /**
+     * 当前帧中可点击链接的屏幕区域。
+     * <p>每帧渲染时重建：文本会随滚动和窗口缩放移动，缓存旧坐标会导致点错位置。
+     */
+    private final List<LinkHitbox> linkHitboxes = new ArrayList<>();
+
+    /** 一个链接的可点击区域（单个字符宽度，多字符链接会有多段，换行时按行拆开）。 */
+    private record LinkHitbox(int x1, int y1, int x2, int y2, String url) {
+        boolean contains(double mx, double my) {
+            return mx >= x1 && mx < x2 && my >= y1 && my < y2;
+        }
+    }
+
     private Button prevSectionButton;
     private Button nextSectionButton;
 
@@ -100,12 +119,34 @@ public class HelperScreen extends Screen {
     // 滚动区域辅助
     private ScrollableArea scrollableArea;
 
-    // 标题映射
-    private static final Map<String, String> TOPIC_TITLES = new HashMap<>();
+    // 标题映射（英文 topic -> 中文名），用 LinkedHashMap 保证候选项顺序与注册顺序一致
+    private static final Map<String, String> TOPIC_TITLES = new LinkedHashMap<>();
     static {
         TOPIC_TITLES.put("low_memory", "内存不足");
         TOPIC_TITLES.put("shader_install", "光影安装");
         TOPIC_TITLES.put("mod_install", "模组安装");
+        TOPIC_TITLES.put("tc_use", "TouchController使用教程");
+    }
+
+    /** 全部已注册的中文名，供命令候选项使用。 */
+    public static java.util.Collection<String> topicTitles() {
+        return TOPIC_TITLES.values();
+    }
+
+    /**
+     * 中文名反查英文 topic；传入英文 topic 时原样返回。
+     * <p>顺便剥掉可能存在的成对引号与首尾空白，让带引号的写法也能用。
+     */
+    public static String resolveTopic(String input) {
+        if (input == null) return null;
+        String key = input.trim();
+        if (key.length() >= 2 && key.startsWith("\"") && key.endsWith("\"")) {
+            key = key.substring(1, key.length() - 1).trim();
+        }
+        for (Map.Entry<String, String> entry : TOPIC_TITLES.entrySet()) {
+            if (entry.getValue().equals(key)) return entry.getKey();
+        }
+        return key;
     }
 
 
@@ -260,15 +301,62 @@ public class HelperScreen extends Screen {
                     continue;
                 }
             }
+            // 语法：/url/显示文字|https://.../url/，点击后在浏览器打开该网址
+            if (text.startsWith("/url/", i)) {
+                int end = text.indexOf("/url/", i + 5);
+                if (end != -1) {
+                    String body = text.substring(i + 5, end);
+                    int bar = body.indexOf('|');
+                    if (bar != -1) {
+                        Component link = buildUrlLink(body.substring(0, bar), body.substring(bar + 1), baseStyle);
+                        if (link != null) {
+                            result.append(link);
+                            i = end + 5;
+                            continue;
+                        }
+                    }
+                }
+            }
             int nextWarn = text.indexOf("/warn/", i);
             int nextHint = text.indexOf("/hint/", i);
+            int nextUrl = text.indexOf("/url/", i);
             int next = text.length();
             if (nextWarn != -1 && nextWarn < next) next = nextWarn;
             if (nextHint != -1 && nextHint < next) next = nextHint;
+            if (nextUrl != -1 && nextUrl < next) next = nextUrl;
             result.append(Component.literal(text.substring(i, next)).setStyle(baseStyle));
             i = next;
         }
         return result;
+    }
+
+    /**
+     * 构造一个可点击的网址链接组件。
+     * <p>点击时先弹确认框（与配置界面「获取 Key」一致），确认后交给系统浏览器打开。
+     * 网址不合法时返回 {@code null}，由调用方退化为普通文本。
+     */
+    private Component buildUrlLink(String label, String url, Style baseStyle) {
+        String trimmedUrl = url.trim();
+        if (!isHttpUrl(trimmedUrl)) {
+            System.err.println("[VerityConfig] 帮助文档中的链接格式不正确，已忽略: " + url);
+            return null;
+        }
+        String text = label.trim();
+        if (text.isEmpty()) text = trimmedUrl;
+
+        return Component.literal(text).setStyle(baseStyle
+                .withColor(ChatFormatting.AQUA)
+                .withUnderlined(true)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, trimmedUrl))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("点击打开：").withStyle(ChatFormatting.WHITE)
+                                .append(Component.literal(trimmedUrl).withStyle(ChatFormatting.GRAY)))));
+    }
+
+    /** 只接受 http/https，避免把本地文件路径之类的字符串当链接打开。 */
+    private static boolean isHttpUrl(String url) {
+        String lower = url.toLowerCase();
+        return lower.startsWith("http://") || lower.startsWith("https://");
     }
 
     private void recalcImageHeights() {
@@ -350,10 +438,9 @@ public class HelperScreen extends Screen {
             return imageTextureCache.get(imageName);
         }
 
-        String baseName = currentPlatform == Platform.WINDOWS
-                ? topic + "_pc"
-                : topic + "_mobile";
-        String path = "help/pngres/" + baseName + "/" + imageName;
+        // 图片不再按平台分目录：同一主题下 PC 与手机共用 pngres/<topic>/，
+        // 文件名本身已能区分（PC 多为 pcl_*.png，手机多为 fcl_*.jpg）
+        String path = "help/pngres/" + topic + "/" + imageName;
 
         ResourceLocation imageRes;
         try {
@@ -420,6 +507,7 @@ public class HelperScreen extends Screen {
         int currentOffset = scrollableArea.getScrollOffset();
 
         int currentY = CONTENT_TOP - currentOffset;
+        linkHitboxes.clear();
         for (HelpLine line : currentLines) {
             if (currentY + line.height < CONTENT_TOP || currentY > contentBottom) {
                 currentY += line.height;
@@ -427,11 +515,12 @@ public class HelperScreen extends Screen {
             }
 
             if (line.type == HelpLine.Type.TEXT) {
-                graphics.drawString(this.font, line.sequence, 10, currentY, 0xFFFFFF, false);
+                graphics.drawString(this.font, line.sequence, TEXT_LEFT, currentY, 0xFFFFFF, false);
+                collectLinkHitboxes(line.sequence, currentY);
                 currentY += line.height;
             } else if (line.type == HelpLine.Type.SECTION) {
                 graphics.fill(10, currentY - 2, this.width - 10, currentY - 1, 0xFFAAAAAA);
-                graphics.drawString(this.font, line.sequence, 10, currentY + 2, 0xFFFFFF, false);
+                graphics.drawString(this.font, line.sequence, TEXT_LEFT, currentY + 2, 0xFFFFFF, false);
                 currentY += line.height;
             } else if (line.type == HelpLine.Type.IMAGE) {
                 ResourceLocation tex = getOrLoadImageTexture(line.imageName);
@@ -469,6 +558,49 @@ public class HelperScreen extends Screen {
         }
     }
 
+    /**
+     * 扫描一行文本，记录其中可点击链接的屏幕区域。
+     * <p>逐字符取 {@link Style}，把 URL 相同的连续字符归并为一段。
+     * 链接被自动换行拆到多行时，会按行分别记录（每行调用一次本方法）。
+     */
+    private void collectLinkHitboxes(FormattedCharSequence sequence, int lineY) {
+        if (sequence == null) return;
+
+        final int[] cursorX = {TEXT_LEFT};
+        final String[] runUrl = {null};
+        final int[] runStartX = {TEXT_LEFT};
+
+        sequence.accept((index, style, codePoint) -> {
+            String url = clickUrlOf(style);
+            int charWidth = this.font.width(new String(Character.toChars(codePoint)));
+
+            if (url == null || !url.equals(runUrl[0])) {
+                // 链接段结束：记录上一段，然后开始新的一段
+                flushLink(runUrl[0], runStartX[0], cursorX[0], lineY);
+                runUrl[0] = url;
+                runStartX[0] = cursorX[0];
+            }
+            cursorX[0] += charWidth;
+            return true;
+        });
+
+        flushLink(runUrl[0], runStartX[0], cursorX[0], lineY);
+    }
+
+    /** 把一段链接区间记录为可点击区域。 */
+    private void flushLink(String url, int startX, int endX, int lineY) {
+        if (url == null || endX <= startX) return;
+        linkHitboxes.add(new LinkHitbox(startX, lineY, endX, lineY + this.font.lineHeight, url));
+    }
+
+    /** 取出样式上挂载的 URL；没有点击事件或不是 OPEN_URL 时返回 {@code null}。 */
+    private static String clickUrlOf(Style style) {
+        if (style == null) return null;
+        ClickEvent event = style.getClickEvent();
+        if (event == null || event.getAction() != ClickEvent.Action.OPEN_URL) return null;
+        return event.getValue();
+    }
+
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         return scrollableArea.mouseScrolled(mouseX, mouseY, delta, getTotalContentHeight());
@@ -482,7 +614,27 @@ public class HelperScreen extends Screen {
             scrollableArea.updateScrollFromMouse(mouseY, this.width, getTotalContentHeight());
             return true;
         }
+        // 帮助文档中的超链接（区域由上一帧 render 收集）
+        if (button == 0) {
+            for (LinkHitbox hitbox : linkHitboxes) {
+                if (hitbox.contains(mouseX, mouseY)) {
+                    openUrl(hitbox.url());
+                    return true;
+                }
+            }
+        }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    /** 弹确认框后交给系统浏览器打开，与配置界面「获取 Key」的处理方式一致。 */
+    private void openUrl(String url) {
+        Minecraft mc = Minecraft.getInstance();
+        mc.setScreen(new ConfirmLinkScreen(confirmed -> {
+            if (confirmed) {
+                net.minecraft.Util.getPlatform().openUri(url);
+            }
+            mc.setScreen(this);
+        }, url, false));
     }
 
     @Override

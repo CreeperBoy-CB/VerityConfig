@@ -47,10 +47,17 @@ public class ClientCommands {
                                     showCommandList();
                                     return 1;
                                 })
-                                .then(Commands.argument("topic", StringArgumentType.word())
+                                .then(Commands.argument("topic", StringArgumentType.greedyString())
+                                        .suggests((ctx, builder) -> {
+                                            for (String title : HelperScreen.topicTitles()) {
+                                                builder.suggest(title);
+                                            }
+                                            return builder.buildFuture();
+                                        })
                                         .executes(ctx -> {
                                             String topic = StringArgumentType.getString(ctx, "topic");
-                                            openHelpTopic(topic);
+                                            // 允许直接输入中文名，内部统一转成英文 topic
+                                            openHelpTopic(HelperScreen.resolveTopic(topic));
                                             return 1;
                                         })
                                 )
