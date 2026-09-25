@@ -64,6 +64,40 @@ public class ModsListScreen extends Screen {
             "钠／Embeddium：动态光源"
     ));
 
+    /**
+     * 仅 Windows 可用的模组：非 Windows 端仍然列出，但不允许启用。
+     * <p>之所以不直接隐藏，是为了让用户知道这些模组的存在与不可用原因，
+     * 而不是疑惑「整合包里到底有没有这个模组」。
+     */
+    private static final Set<String> WINDOWS_ONLY_BRACKETS = new HashSet<>(Arrays.asList(
+            "输入法冲突修复",
+            "遥远的地平线"
+    ));
+
+    /** 该模组在当前平台是否允许启用。 */
+    private static boolean canEnableOnThisPlatform(String bracketText) {
+        return PlatformUtils.isWindows() || !WINDOWS_ONLY_BRACKETS.contains(bracketText);
+    }
+
+    /** 在非 Windows 端点了仅 Windows 可用的模组时给出说明，避免用户以为是按钮失效。 */
+    private void sendPlatformUnsupportedHint(String bracketText) {
+        sendChatMessage("「" + bracketText + "」仅支持 Windows，当前平台无法启用");
+    }
+
+    /** 发送一条聊天栏提示；无玩家时改用物品栏提示，两者都不可用时只记日志。 */
+    private void sendChatMessage(String text) {
+        Component message = Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal(text).withStyle(ChatFormatting.WHITE));
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.displayClientMessage(message, false);
+        } else if (mc.gui != null) {
+            mc.gui.setOverlayMessage(message, false);
+        } else {
+            System.out.println("[VerityConfig] " + text);
+        }
+    }
+
     private static final Map<String, List<String>> MOD_DEPENDENCIES = new HashMap<>();
     static {
         MOD_DEPENDENCIES.put("Sodium Options API", Arrays.asList("Embeddium"));
@@ -341,7 +375,7 @@ public class ModsListScreen extends Screen {
             if (!bracketMatcher.find()) continue;
             String bracketText = bracketMatcher.group(1);
 
-            if (!PlatformUtils.isWindows() && bracketText.equals("输入法冲突修复")) {
+            if (!canEnableOnThisPlatform(bracketText)) {
                 continue;
             }
 
@@ -396,7 +430,8 @@ public class ModsListScreen extends Screen {
                     return;
                 }
             }
-            if (!PlatformUtils.isWindows() && entry.bracketText.equals("输入法冲突修复")) {
+            if (!canEnableOnThisPlatform(entry.bracketText)) {
+                sendPlatformUnsupportedHint(entry.bracketText);
                 return;
             }
             File target = new File(source.getParentFile(), name.substring(0, name.length() - ".disabled".length()));
