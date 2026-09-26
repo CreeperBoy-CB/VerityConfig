@@ -255,6 +255,26 @@ public class ModsListScreen extends Screen {
     private ScrollableArea scrollableArea;
     private boolean draggingScrollbar = false;
 
+    /**
+     * 找出「已启用、但没有被任何已启用模组依赖」的前置模组。
+     * <p>只检查「前置」分类下、且不在 {@link #HIDDEN_BRACKETS} 里的模组：
+     * 隐藏的那些是整合包自身运行所必需的，禁用了会直接出问题。
+     * <p>判定依据是 {@link #MOD_DEPENDENCIES}：表中没有任何启用中的
+     * 模组把它列为前置，就算当前没派上用场。
+     */
+    private List<String> findUnusedPrerequisites() {
+        List<String> unused = new ArrayList<>();
+        for (ModEntry entry : mods) {
+            if (entry.disabled) continue;
+            if (!"前置".equals(entry.braceText)) continue;
+            if (HIDDEN_BRACKETS.contains(entry.bracketText)) continue;
+            // 有任何一个启用中的模组依赖它，就不算没用
+            if (!findEnabledDependents(entry.bracketText).isEmpty()) continue;
+            unused.add(entry.bracketText);
+        }
+        return unused;
+    }
+
     /** 前置依赖确认的配色：边框与文字用同一个蓝，文字更淡。 */
     private static final int DEP_BORDER_COLOR = 0xFF5599FF;
     private static final int DEP_TEXT_COLOR = 0xFFAACCFF;
@@ -638,14 +658,7 @@ public class ModsListScreen extends Screen {
                 returnToConfigScreen = false;
                 Minecraft.getInstance().setScreen(new VerityConfigScreen());
             } else {
-                List<ModGuideReminderScreen.GuideEntry> unread = collectUnreadGuides();
-                if (unread.isEmpty()) {
-                    showRestartConfirm();
-                } else {
-                    // 有启用了却没看过教程的模组：先引导阅读，看完再问重启
-                    Minecraft.getInstance().setScreen(
-                            new ModGuideReminderScreen(unread, this));
-                }
+                checkUnreadGuidesThenRestart();
             }
         }).pos(rightX, 5).size(70, 20).build();
         this.addRenderableWidget(this.doneButton);
@@ -897,6 +910,56 @@ public class ModsListScreen extends Screen {
                     entry.bracketText, helper.label(), helper.topic()));
         }
         return unread;
+    }
+
+    /**
+     * 按模组名批量禁用（供「没用的前置」确认界面调用）。
+     * <p>直接改文件名而不走 {@link #toggleMod}：那套流程会弹依赖确认，
+     * 而这里禁用的正是「没有被任何已启用模组依赖」的那些，不会牵连别人。
+     */
+    /**
+     * 按模组名批量禁用（供「没用的前置」确认界面调用）。
+     * <p>直接改文件名而不走 {@link #toggleMod}：那套流程会弹依赖确认，
+     * 而这里禁用的正是「没有被任何已启用模组依赖」的那些，不会牵连别人。
+     * <p>改名后重新扫描目录，这样回到列表时显示的就是新状态。
+     */
+    public void disableModsByName(List<String> bracketNames) {
+        for (String bracketText : bracketNames) {
+            ModEntry entry = findModByBracket(bracketText);
+            if (entry == null || entry.disabled) continue;
+            File source = entry.file;
+            File target = new File(source.getParentFile(), source.getName() + ".disabled");
+            if (target.exists()) target.delete();
+            source.renameTo(target);
+        }
+        loadModList();
+    }
+
+    /**
+     * 点「完成」后的检查链：教程提醒 → 前置模组检查 → 重启确认。
+     * <p>拆成两级各自判断，任何一级没有内容就跳到下一级，
+     * 全都通过时直接弹重启确认。
+     */
+    private void checkUnreadGuidesThenRestart() {
+        List<ModGuideReminderScreen.GuideEntry> unread = collectUnreadGuides();
+        if (unread.isEmpty()) {
+            checkUnusedPrerequisitesThenRestart();
+            return;
+        }
+        // 有启用了却没看过教程的模组：先引导阅读，看完再检查前置
+        Minecraft.getInstance().setScreen(new ModGuideReminderScreen(
+                unread, this, this::checkUnusedPrerequisitesThenRestart));
+    }
+
+    /** 教程环节之后的第二级检查：没派上用场的前置模组。 */
+    private void checkUnusedPrerequisitesThenRestart() {
+        List<String> unused = findUnusedPrerequisites();
+        if (unused.isEmpty()) {
+            showRestartConfirm();
+            return;
+        }
+        Minecraft.getInstance().setScreen(new UnusedPrerequisiteScreen(
+                unused, this, this::showRestartConfirm));
     }
 
     private void showRestartConfirm() {

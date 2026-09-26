@@ -27,6 +27,10 @@ public class ModGuideReminderScreen extends Screen {
     /** 已经启用了这些模组、但对应教程尚未阅读。 */
     private final List<GuideEntry> pending;
     private final Screen returnScreen;
+
+    /** 本页结束后的回调：交给调用方继续下一级检查（前置模组、重启确认）。 */
+    private final Runnable onFinished;
+
     /** 每行「点击此处」的屏幕区域，render 时重建。 */
     private final List<int[]> linkRects = new ArrayList<>();
 
@@ -34,9 +38,14 @@ public class ModGuideReminderScreen extends Screen {
     private static final int TITLE_Y = 30;
 
     public ModGuideReminderScreen(List<GuideEntry> pending, Screen returnScreen) {
+        this(pending, returnScreen, null);
+    }
+
+    public ModGuideReminderScreen(List<GuideEntry> pending, Screen returnScreen, Runnable onFinished) {
         super(Component.literal("模组教程提醒"));
         this.pending = new ArrayList<>(pending);
         this.returnScreen = returnScreen;
+        this.onFinished = onFinished;
     }
 
     /**
@@ -61,7 +70,7 @@ public class ModGuideReminderScreen extends Screen {
                 topics.add(entry.topic());
             }
             HelpReadTracker.markAllRead(topics);
-            proceedToRestart();
+            proceed();
         }).pos(this.width / 2 - 105, buttonY).size(100, 20).build());
 
         this.addRenderableWidget(Button.builder(Component.literal("返回"), btn -> {
@@ -73,8 +82,15 @@ public class ModGuideReminderScreen extends Screen {
         }).pos(this.width / 2 + 5, buttonY).size(100, 20).build());
     }
 
-    /** 看完引导后的正常流程：与点「完成」时一致，弹重启确认。 */
-    private void proceedToRestart() {
+    /**
+     * 本页结束，交回给调用方继续。
+     * <p>没有回调时退化为直接弹重启确认，保持单独使用本界面的可能。
+     */
+    private void proceed() {
+        if (onFinished != null) {
+            onFinished.run();
+            return;
+        }
         Minecraft mc = Minecraft.getInstance();
         mc.setScreen(new ConfirmScreen(confirmed -> {
             if (confirmed) {
