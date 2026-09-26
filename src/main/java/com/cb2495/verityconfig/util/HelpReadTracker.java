@@ -10,20 +10,23 @@ import net.minecraftforge.fml.loading.FMLPaths;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
  * 记录用户读过哪些帮助文档。
  * <p>用于在用户启用某些模组却没看过对应教程时给出提醒。
- * <p>数据存在 {@code .cache/vcread.json}，与整合包配置分离：
- * 删掉配置不该让用户重新被提醒一遍，重装整合包才会重置。
+ * <p>记录两类主题：真正打开过的帮助文档，以及在提醒界面点过
+ * 「我已了解，继续」的那些——后者表示用户自认不需要看，不该再提醒。
+ * <p>数据存在 {@code config/verity_config/read_help_message.json}。
  */
 public final class HelpReadTracker {
     private HelpReadTracker() {}
 
     private static Path readFile() {
-        return FMLPaths.GAMEDIR.get().resolve(".cache/vcread.json");
+        return FMLPaths.GAMEDIR.get()
+                .resolve("config/verity_config/read_help_message.json");
     }
 
     /** 已读主题集合；null 表示尚未从磁盘加载。 */
@@ -74,6 +77,22 @@ public final class HelpReadTracker {
         if (topic == null || topic.isEmpty()) return;
         if (!topics().add(topic)) return;
         save();
+    }
+
+    /**
+     * 批量标记为已读。
+     * <p>用于在提醒界面点「我已了解，继续」时，把本次提醒到的模组
+     * 一次性记为已读——用户既然选择继续，就不该在下次启动时又被拦一次。
+     * <p>只写一次磁盘，而不是逐个调用 {@link #markRead}。
+     */
+    public static void markAllRead(Collection<String> topicList) {
+        if (topicList == null || topicList.isEmpty()) return;
+        boolean changed = false;
+        for (String topic : topicList) {
+            if (topic == null || topic.isEmpty()) continue;
+            if (topics().add(topic)) changed = true;
+        }
+        if (changed) save();
     }
 
     private static void save() {

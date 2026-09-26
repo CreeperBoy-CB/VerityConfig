@@ -54,6 +54,13 @@ public class ModGuideReminderScreen extends Screen {
         refreshPending();
         int buttonY = TITLE_Y + 16 + pending.size() * LINE_GAP + 14;
         this.addRenderableWidget(Button.builder(Component.literal("我已了解，继续"), btn -> {
+            // 用户明确表示不需要看：把本次提醒到的主题一次性记为已读，
+            // 否则下次点完成还会被同一个提示拦一次
+            List<String> topics = new ArrayList<>();
+            for (GuideEntry entry : pending) {
+                topics.add(entry.topic());
+            }
+            HelpReadTracker.markAllRead(topics);
             proceedToRestart();
         }).pos(this.width / 2 - 105, buttonY).size(100, 20).build());
 
