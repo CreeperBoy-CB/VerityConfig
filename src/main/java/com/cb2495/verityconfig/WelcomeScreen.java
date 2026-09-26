@@ -1,5 +1,6 @@
 package com.cb2495.verityconfig;
 
+import com.cb2495.verityconfig.util.EasterEggAssets;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -12,11 +13,22 @@ public class WelcomeScreen extends Screen {
     // 新增：内存警告文字
     private String memoryWarning = null;
 
+    /** 版本号上的彩蛋。 */
+    private final EasterEggController easterEgg = new EasterEggController();
+
     public WelcomeScreen() {
         super(Component.literal("欢迎"));
         VerityConfig.loadVersions(); // 使用统一版本加载
         checkMemory();
+        // 进入欢迎界面就把彩蛋资源读进内存，点击时才不会有加载卡顿
+        EasterEggAssets.loadAll();
     }
+
+    /**
+     * 版本号在屏幕上的矩形，用于点击检测。
+     * <p>渲染时记录、点击时读取，避免两处各写一遍坐标而算岔。
+     */
+    private int[] versionRect = null;
 
     // 新增：检测JVM最大内存
     private void checkMemory() {
@@ -72,7 +84,18 @@ public class WelcomeScreen extends Screen {
         graphics.pose().popPose();
 
         // ===== 版本号（白色，紧贴标题下方） =====
-        graphics.drawCenteredString(this.font, ModsListScreen.modpackVersion, centerX, this.height / 2 - 20, 0xFFFFFF);
+        // 点过之后染成淡蓝色，暗示这里还藏着东西
+        int versionY = this.height / 2 - 20;
+        int versionColor = easterEgg.isVersionClicked()
+                ? EasterEggController.VERSION_CLICKED_COLOR
+                : 0xFFFFFF;
+        graphics.drawCenteredString(this.font, ModsListScreen.modpackVersion, centerX, versionY, versionColor);
+        // 记录版本号区域，供点击检测使用
+        int versionWidth = this.font.width(ModsListScreen.modpackVersion);
+        this.versionRect = new int[]{
+                centerX - versionWidth / 2, versionY,
+                centerX + versionWidth / 2, versionY + this.font.lineHeight
+        };
 
         // ===== 内存警告（红色，版本号下方） =====
         if (memoryWarning != null) {
@@ -91,7 +114,53 @@ public class WelcomeScreen extends Screen {
         // ===== 底部提示文字（灰色） =====
         graphics.drawCenteredString(this.font, "点击 继续 开始配置", centerX, this.height - 12, 0xFFAAAAAA);
 
+        // 按钮等控件由 super.render 绘制，必须放在它之前调用；
+        // 彩蛋则要盖住这些控件，所以放到 super.render 之后
         super.render(graphics, mouseX, mouseY, partialTick);
+
+        easterEgg.render(graphics, this.width, this.height);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // 演出期间吞掉全部点击，避免误触「继续」跳到下一个界面
+        if (easterEgg.blocksInput()) {
+            return true;
+        }
+        if (button == 0 && !isOverAnyWidget(mouseX, mouseY)) {
+            // 小图显形后，点击范围收窄到小图本身：超出的点击不增加不透明度。
+            // 按钮仍排除在外 —— 小图会滞留十几秒，若连按钮也被吃掉，
+            // 用户想进配置界面就得干等它淡完。
+            if (easterEgg.isKidVisible()) {
+                return easterEgg.isInsideKid(mouseX, mouseY)
+                        && easterEgg.onClickVersion();
+            }
+            if (versionRect != null
+                    && mouseX >= versionRect[0] && mouseX <= versionRect[2]
+                    && mouseY >= versionRect[1] && mouseY <= versionRect[3]) {
+                return easterEgg.onClickVersion();
+            }
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    /** 鼠标是否落在某个按钮上（用于把按钮从彩蛋的整屏点击里让出来）。 */
+    private boolean isOverAnyWidget(double mouseX, double mouseY) {
+        for (var renderable : this.renderables) {
+            if (renderable instanceof net.minecraft.client.gui.components.AbstractWidget widget
+                    && widget.visible
+                    && widget.isMouseOver(mouseX, mouseY)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void removed() {
+        super.removed();
+        // 离开本界面时停掉彩蛋音乐，否则会在配置界面继续响
+        easterEgg.onScreenClosed();
     }
 
     @Override

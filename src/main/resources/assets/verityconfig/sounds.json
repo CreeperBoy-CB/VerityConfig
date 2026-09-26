@@ -1,0 +1,18 @@
+{
+  "easteregg.67_effect": {
+    "sounds": [
+      {
+        "name": "verityconfig:easteregg/67_effect",
+        "stream": false
+      }
+    ]
+  },
+  "easteregg.67": {
+    "sounds": [
+      {
+        "name": "verityconfig:easteregg/67",
+        "stream": true
+      }
+    ]
+  }
+}
