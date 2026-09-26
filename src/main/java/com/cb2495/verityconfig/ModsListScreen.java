@@ -67,6 +67,22 @@ public class ModsListScreen extends Screen {
     ));
 
     /**
+     * 仅在非 Windows 端自动启用的模组。
+     * <p>触摸控制器是给手机端用的触屏操作方案，PC 上启用没有意义，
+     * 所以不能写进 {@link #AUTO_ENABLE_BRACKETS}（那是一份与平台无关的名单）。
+     */
+    private static final Set<String> AUTO_ENABLE_NON_WINDOWS_BRACKETS = new HashSet<>(Arrays.asList(
+            "触摸控制器"
+    ));
+
+    /** 该模组在当前平台是否应当被自动启用。 */
+    private static boolean shouldAutoEnableOnThisPlatform(String bracketText) {
+        if (AUTO_ENABLE_BRACKETS.contains(bracketText)) return true;
+        return !PlatformUtils.isWindows()
+                && AUTO_ENABLE_NON_WINDOWS_BRACKETS.contains(bracketText);
+    }
+
+    /**
      * 仅 Windows 可用的模组：非 Windows 端仍然列出，但不允许启用。
      * <p>之所以不直接隐藏，是为了让用户知道这些模组的存在与不可用原因，
      * 而不是疑惑「整合包里到底有没有这个模组」。
@@ -661,7 +677,7 @@ public class ModsListScreen extends Screen {
                 continue;
             }
 
-            if (AUTO_ENABLE_BRACKETS.contains(bracketText)) {
+            if (shouldAutoEnableOnThisPlatform(bracketText)) {
                 String newName = name.substring(0, name.length() - ".disabled".length());
                 File target = new File(dir, newName);
                 if (target.exists()) target.delete();
