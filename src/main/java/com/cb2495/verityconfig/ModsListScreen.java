@@ -81,6 +81,27 @@ public class ModsListScreen extends Screen {
         return PlatformUtils.isWindows() || !WINDOWS_ONLY_BRACKETS.contains(bracketText);
     }
 
+    /** 条目右侧的教程按钮：显示文字 + 点击后打开的帮助主题。 */
+    private record HelperButton(String label, String topic) {
+    }
+
+    /** 教程按钮的边框颜色：淡蓝色，比默认的灰色描边更醒目。 */
+    private static final int HELPER_BORDER_COLOR = 0xFF88CCFF;
+
+    /** 哪些模组在条目右侧显示教程按钮，以及各自的显示文字与帮助主题。 */
+    private static final Map<String, HelperButton> MOD_HELPER_BUTTONS = new HashMap<>();
+    static {
+        MOD_HELPER_BUTTONS.put("Oculus",
+                new HelperButton("如何安装光影", "shader_install"));
+        MOD_HELPER_BUTTONS.put("触摸控制器",
+                new HelperButton("使用教程", "tc_use"));
+    }
+
+    /** 按钮尺寸与右边距：绘制与点击检测共用，避免两处写死后不一致。 */
+    private static final int HELPER_BUTTON_WIDTH = 90;
+    private static final int HELPER_BUTTON_HEIGHT = 16;
+    private static final int HELPER_BUTTON_MARGIN = 10;
+
     private static final Map<String, List<String>> MOD_DEPENDENCIES = new HashMap<>();
     static {
         MOD_DEPENDENCIES.put("Sodium Options API", Arrays.asList("Embeddium"));
@@ -932,14 +953,10 @@ public class ModsListScreen extends Screen {
                         withAlpha(0xFFAAAAAA, normalAlpha), false);
             }
 
-            if (entry.bracketText.equals("Oculus")) {
-                int btnX = this.width - 100;
-                int btnY = y + 2;
-                int btnWidth = 90;
-                int btnHeight = 16;
-                graphics.fill(btnX, btnY, btnX + btnWidth, btnY + btnHeight, 0xFF555555);
-                graphics.renderOutline(btnX, btnY, btnWidth, btnHeight, 0xFFAAAAAA);
-                graphics.drawCenteredString(this.font, "如何安装光影", btnX + btnWidth / 2, btnY + (btnHeight - 8) / 2, 0xFFFFFF);
+            // 教程按钮：尺寸与位置由 renderHelperButton 统一决定
+            HelperButton helper = MOD_HELPER_BUTTONS.get(entry.bracketText);
+            if (helper != null) {
+                renderHelperButton(graphics, helper, y);
             }
         }
 
@@ -1217,9 +1234,12 @@ public class ModsListScreen extends Screen {
             return true;
         }
 
-        if (button == 0 && isMouseOverOculusButton(mouseX, mouseY)) {
-            Minecraft.getInstance().setScreen(new HelperScreen("shader_install", this));
-            return true;
+        if (button == 0) {
+            HelperButton hit = findClickedHelperButton(mouseX, mouseY);
+            if (hit != null) {
+                Minecraft.getInstance().setScreen(new HelperScreen(hit.topic(), this));
+                return true;
+            }
         }
 
         if (button == 0) {
@@ -1249,24 +1269,47 @@ public class ModsListScreen extends Screen {
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
-    private boolean isMouseOverOculusButton(double mouseX, double mouseY) {
+    /** 教程按钮的左上角 x 坐标（贴右边缘，留出 HELPER_BUTTON_MARGIN 的边距）。 */
+    private int helperButtonX() {
+        return this.width - HELPER_BUTTON_MARGIN - HELPER_BUTTON_WIDTH;
+    }
+
+    /** 教程按钮相对条目顶部的 y 偏移：条目高 18px、按钮高 16px，上下各留 1px。 */
+    private static int helperButtonOffsetY() {
+        return (ITEM_VISUAL_HEIGHT - HELPER_BUTTON_HEIGHT) / 2;
+    }
+
+    /** 画一个教程按钮：深灰底 + 淡蓝色边框 + 白色居中文字。 */
+    private void renderHelperButton(GuiGraphics graphics, HelperButton helper, int itemY) {
+        int btnX = helperButtonX();
+        int btnY = itemY + helperButtonOffsetY();
+        graphics.fill(btnX, btnY, btnX + HELPER_BUTTON_WIDTH, btnY + HELPER_BUTTON_HEIGHT, 0xFF555555);
+        graphics.renderOutline(btnX, btnY, HELPER_BUTTON_WIDTH, HELPER_BUTTON_HEIGHT, HELPER_BORDER_COLOR);
+        graphics.drawCenteredString(this.font, helper.label(),
+                btnX + HELPER_BUTTON_WIDTH / 2, btnY + (HELPER_BUTTON_HEIGHT - 8) / 2, 0xFFFFFF);
+    }
+
+    /**
+     * 找出鼠标正下方的教程按钮。
+     * <p>只遍历当前可见行，因此滚出视野或被过滤掉的条目不会留下可点击的幽灵按钮。
+     */
+    private HelperButton findClickedHelperButton(double mouseX, double mouseY) {
         List<ModEntry> filteredMods = getFilteredMods();
         int scrollOffset = scrollableArea.getScrollOffset();
         int maxVisible = scrollableArea.getMaxVisible();
+        int btnX = helperButtonX();
         for (int i = 0; i < maxVisible && scrollOffset / ITEM_HEIGHT + i < filteredMods.size(); i++) {
             int index = scrollOffset / ITEM_HEIGHT + i;
             ModEntry entry = filteredMods.get(index);
-            if (entry.bracketText.equals("Oculus")) {
-                int y = LIST_TOP + i * ITEM_HEIGHT;
-                int btnX = this.width - 100;
-                int btnY = y + 2;
-                int btnWidth = 90;
-                int btnHeight = 16;
-                return mouseX >= btnX && mouseX <= btnX + btnWidth &&
-                        mouseY >= btnY && mouseY <= btnY + btnHeight;
+            HelperButton helper = MOD_HELPER_BUTTONS.get(entry.bracketText);
+            if (helper == null) continue;
+            int btnY = LIST_TOP + i * ITEM_HEIGHT + helperButtonOffsetY();
+            if (mouseX >= btnX && mouseX <= btnX + HELPER_BUTTON_WIDTH
+                    && mouseY >= btnY && mouseY <= btnY + HELPER_BUTTON_HEIGHT) {
+                return helper;
             }
         }
-        return false;
+        return null;
     }
 
     @Override
