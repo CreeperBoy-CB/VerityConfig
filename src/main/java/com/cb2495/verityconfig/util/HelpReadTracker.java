@@ -19,14 +19,14 @@ import java.util.Set;
  * <p>用于在用户启用某些模组却没看过对应教程时给出提醒。
  * <p>记录两类主题：真正打开过的帮助文档，以及在提醒界面点过
  * 「我已了解，继续」的那些——后者表示用户自认不需要看，不该再提醒。
- * <p>数据存在 {@code config/verity_config/read_help_message.json}。
+ * <p>数据存在 {@code .cache/verity_config/read_help_message.json}。
  */
 public final class HelpReadTracker {
     private HelpReadTracker() {}
 
     private static Path readFile() {
         return FMLPaths.GAMEDIR.get()
-                .resolve("config/verity_config/read_help_message.json");
+                .resolve(".cache/verity_config/read_help_message.json");
     }
 
     /** 已读主题集合；null 表示尚未从磁盘加载。 */
