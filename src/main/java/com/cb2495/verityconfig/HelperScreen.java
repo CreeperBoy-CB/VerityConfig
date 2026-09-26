@@ -1,5 +1,6 @@
 package com.cb2495.verityconfig;
 
+import com.cb2495.verityconfig.util.HelpReadTracker;
 import com.cb2495.verityconfig.util.PlatformUtils;
 import com.cb2495.verityconfig.util.ScrollableArea;
 import com.mojang.blaze3d.platform.NativeImage;
@@ -160,6 +161,9 @@ public class HelperScreen extends Screen {
         this.topic = topic;
         this.currentPlatform = PlatformUtils.isWindows() ? Platform.WINDOWS : Platform.ANDROID;
         this.returnScreen = returnScreen;
+        // 打开即视为已读：用于「启用了模组却没看过教程」的提醒判定。
+        // 放在构造函数里，这样从模组列表、命令、欢迎界面进来的都能记录到。
+        HelpReadTracker.markRead(topic);
     }
 
     public HelperScreen() {

@@ -1,5 +1,6 @@
 package com.cb2495.verityconfig;
 
+import com.cb2495.verityconfig.util.HelpReadTracker;
 import com.cb2495.verityconfig.util.PlatformUtils;
 import com.cb2495.verityconfig.util.ScrollableArea;
 import net.minecraft.ChatFormatting;
@@ -117,6 +118,38 @@ public class ModsListScreen extends Screen {
     private static final int HELPER_BUTTON_WIDTH = 90;
     private static final int HELPER_BUTTON_HEIGHT = 16;
     private static final int HELPER_BUTTON_MARGIN = 10;
+
+    /**
+     * 刚启用带教程的模组时，按钮闪烁提示的时长与闪烁周期。
+     * <p>目的是把用户的注意力引到「这里有个教程」，而不是只靠静态边框。
+     */
+    private static final long GUIDE_FLASH_DURATION_MS = 3000;
+    private static final long GUIDE_FLASH_PERIOD_MS = 400;
+
+    /** 正在闪烁提示的模组名；null 表示没有。 */
+    private String guideFlashBracket = null;
+    private long guideFlashAt = -1;
+
+    /** 若该模组带教程且尚未读过，则让它的教程按钮闪烁几下。 */
+    private void maybeStartGuideFlash(String bracketText) {
+        HelperButton helper = MOD_HELPER_BUTTONS.get(bracketText);
+        if (helper == null) return;
+        if (HelpReadTracker.hasRead(helper.topic())) return;
+        this.guideFlashBracket = bracketText;
+        this.guideFlashAt = System.currentTimeMillis();
+    }
+
+    /**
+     * 该条目的教程按钮是否正处于闪烁的高亮相位。
+     * <p>用方波而不是正弦：闪烁要「一亮一暗」的明确对比，
+     * 渐变反而看不清。超过时长后自动失效，无需外部清理。
+     */
+    private boolean isGuideFlashBright(String bracketText) {
+        if (guideFlashBracket == null || !guideFlashBracket.equals(bracketText)) return false;
+        long elapsed = System.currentTimeMillis() - guideFlashAt;
+        if (elapsed >= GUIDE_FLASH_DURATION_MS) return false;
+        return (elapsed / GUIDE_FLASH_PERIOD_MS) % 2 == 0;
+    }
 
     private static final Map<String, List<String>> MOD_DEPENDENCIES = new HashMap<>();
     static {
@@ -605,7 +638,14 @@ public class ModsListScreen extends Screen {
                 returnToConfigScreen = false;
                 Minecraft.getInstance().setScreen(new VerityConfigScreen());
             } else {
-                showRestartConfirm();
+                List<ModGuideReminderScreen.GuideEntry> unread = collectUnreadGuides();
+                if (unread.isEmpty()) {
+                    showRestartConfirm();
+                } else {
+                    // 有启用了却没看过教程的模组：先引导阅读，看完再问重启
+                    Minecraft.getInstance().setScreen(
+                            new ModGuideReminderScreen(unread, this));
+                }
             }
         }).pos(rightX, 5).size(70, 20).build();
         this.addRenderableWidget(this.doneButton);
@@ -754,6 +794,7 @@ public class ModsListScreen extends Screen {
             File target = new File(source.getParentFile(), name.substring(0, name.length() - ".disabled".length()));
             if (target.exists()) target.delete();
             source.renameTo(target);
+            maybeStartGuideFlash(entry.bracketText);
         } else {
             // 只有「当前已启用且依赖它」的模组才会被影响；
             // 一个都没有时直接禁用，不做无谓的确认打扰
@@ -838,6 +879,24 @@ public class ModsListScreen extends Screen {
             if (target.exists()) target.delete();
             source.renameTo(target);
         }
+    }
+
+    /**
+     * 找出「已启用、且带教程按钮、但教程还没读过」的模组。
+     * <p>已启用的判定直接看条目状态：这里读的是当前列表，
+     * 用户在本次操作里刚勾上的模组也会被算进来。
+     */
+    private List<ModGuideReminderScreen.GuideEntry> collectUnreadGuides() {
+        List<ModGuideReminderScreen.GuideEntry> unread = new ArrayList<>();
+        for (ModEntry entry : mods) {
+            if (entry.disabled) continue;
+            HelperButton helper = MOD_HELPER_BUTTONS.get(entry.bracketText);
+            if (helper == null) continue;
+            if (HelpReadTracker.hasRead(helper.topic())) continue;
+            unread.add(new ModGuideReminderScreen.GuideEntry(
+                    entry.bracketText, helper.label(), helper.topic()));
+        }
+        return unread;
     }
 
     private void showRestartConfirm() {
@@ -972,7 +1031,7 @@ public class ModsListScreen extends Screen {
             // 教程按钮：尺寸与位置由 renderHelperButton 统一决定
             HelperButton helper = MOD_HELPER_BUTTONS.get(entry.bracketText);
             if (helper != null) {
-                renderHelperButton(graphics, helper, y);
+                renderHelperButton(graphics, helper, y, entry.bracketText);
             }
         }
 
@@ -1303,6 +1362,20 @@ public class ModsListScreen extends Screen {
         graphics.renderOutline(btnX, btnY, HELPER_BUTTON_WIDTH, HELPER_BUTTON_HEIGHT, HELPER_BORDER_COLOR);
         graphics.drawCenteredString(this.font, helper.label(),
                 btnX + HELPER_BUTTON_WIDTH / 2, btnY + (HELPER_BUTTON_HEIGHT - 8) / 2, 0xFFFFFF);
+    }
+
+    /**
+     * 画教程按钮，并在刚启用对应模组时闪烁强调。
+     * <p>闪烁的实现是在按钮外圈补一层亮色描边，而不是改按钮自身颜色：
+     * 这样不闪的时候外观与普通状态完全一致，不会有多余的视觉残留。
+     */
+    private void renderHelperButton(GuiGraphics graphics, HelperButton helper, int itemY, String bracketText) {
+        renderHelperButton(graphics, helper, itemY);
+        if (!isGuideFlashBright(bracketText)) return;
+        int btnX = helperButtonX();
+        int btnY = itemY + helperButtonOffsetY();
+        graphics.renderOutline(btnX - 1, btnY - 1,
+                HELPER_BUTTON_WIDTH + 2, HELPER_BUTTON_HEIGHT + 2, 0xFFFFFFFF);
     }
 
     /**
