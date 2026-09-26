@@ -26,7 +26,7 @@ public final class HelpReadTracker {
 
     private static Path readFile() {
         return FMLPaths.GAMEDIR.get()
-                .resolve("config/verity_config/read_help_message.json");
+                .resolve(".cache/verity_config/read_help_message.json");
     }
 
     /** 已读主题集合；null 表示尚未从磁盘加载。 */
