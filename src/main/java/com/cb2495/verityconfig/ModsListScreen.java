@@ -61,7 +61,8 @@ public class ModsListScreen extends Screen {
             "铷 · 扩展",
             "简单翻译",
             "输入法冲突修复",
-            "钠／Embeddium：动态光源"
+            "钠／Embeddium：动态光源",
+            "角色名调整"
     ));
 
     /**
@@ -131,6 +132,7 @@ public class ModsListScreen extends Screen {
         MOD_INTRODUCTIONS.put("现代化 UI", "改善 Minecraft 的UI，使用更清晰的字体");
         MOD_INTRODUCTIONS.put("聊天头像", "在聊天栏显示发言玩家头像(如果你不联机加这个貌似没什么用)");
         MOD_INTRODUCTIONS.put("遥远的地平线", "大幅提升渲染距离而不影响性能");
+        MOD_INTRODUCTIONS.put("角色名调整", "修复Java版1.18+无法使用中文名进入游戏的问题");
     }
 
     private static class ModEntry {
