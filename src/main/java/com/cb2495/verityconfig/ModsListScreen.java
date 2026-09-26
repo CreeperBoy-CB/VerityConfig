@@ -41,7 +41,8 @@ public class ModsListScreen extends Screen {
             "Verity",
             "Verity配置工具",
             "Geckolib",
-            "Cloth Config API"
+            "Cloth Config API",
+            "Yet Another Config Lib"
     ));
 
     private static final Set<String> AUTO_ENABLE_BRACKETS = new HashSet<>(Arrays.asList(
