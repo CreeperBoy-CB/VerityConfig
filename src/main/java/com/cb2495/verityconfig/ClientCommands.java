@@ -156,7 +156,7 @@ public class ClientCommands {
      * <p>用于验证任意时刻（含跨天、跨假期）的判断结果。
      *
      * @param date 日期，格式 {@code YYYY-MM-DD}
-     * @param time 时间，格式 {@code mm:ss}，即小时:分钟
+     * @param time 时间，格式 {@code mm.ss}，即小时.分钟
      */
     private static void runDeepSeekDateTest(String date, String time) {
         Minecraft mc = Minecraft.getInstance();
@@ -165,15 +165,15 @@ public class ClientCommands {
         LocalDateTime moment;
         try {
             LocalDate day = LocalDate.parse(date);
-            String[] parts = time.split(":");
-            if (parts.length != 2) throw new IllegalArgumentException("时间需要 mm:ss");
+            String[] parts = time.split("\\.");
+            if (parts.length != 2) throw new IllegalArgumentException("时间需要 mm.ss");
             int hour = Integer.parseInt(parts[0]);
             int minute = Integer.parseInt(parts[1]);
             if (hour > 23 || minute > 59) throw new IllegalArgumentException("时间超出范围");
             moment = day.atTime(hour, minute);
         } catch (Exception e) {
             mc.player.displayClientMessage(
-                    Component.literal("[VerityConfig] 时间格式错误，应为 /vc test dsdate YYYY-MM-DD mm:ss，例如 2026-10-01 10:00")
+                    Component.literal("[VerityConfig] 时间格式错误，应为 /vc test dsdate YYYY-MM-DD mm.ss，例如 2026-10-01 10.00")
                             .withStyle(ChatFormatting.RED),
                     false);
             return;
