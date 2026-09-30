@@ -4,8 +4,14 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
@@ -16,6 +22,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 
 /**
  * DeepSeek API 的峰谷计价时段判断。
@@ -34,8 +43,13 @@ public final class DeepSeekPricing {
 
     private DeepSeekPricing() {}
 
-    /** 节假日查询接口，日期以 YYYY-MM-DD 拼接。 */
-    private static final String HOLIDAY_API = "https://api.apisbo.com/holidays/date/";
+    /** 节假日查询接口域名，路径为 {@code /holidays/date/<日期>}。 */
+    private static final String HOLIDAY_HOST = "api.apisbo.com";
+
+    /** 连接超时（毫秒）。IPv6 不通时首个请求会在此时间后失败并转入 IPv4 重试。 */
+    private static final int CONNECT_TIMEOUT_MS = 5000;
+    /** 读取超时（毫秒）。 */
+    private static final int READ_TIMEOUT_MS = 5000;
 
     /** 高峰上午段起点。 */
     private static final LocalTime MORNING_START = LocalTime.of(9, 0);
@@ -56,6 +70,8 @@ public final class DeepSeekPricing {
     private static volatile LocalDate todayAttempted = null;
     /** 是否正在批量预取未来日期。 */
     private static volatile boolean bulkPrefetching = false;
+    /** 常规连接失败、IPv4 重试成功后置位，后续请求直接走 IPv4。 */
+    private static volatile boolean preferIpv4 = false;
 
     // ---------- 查询与缓存 ----------
 
@@ -104,34 +120,125 @@ public final class DeepSeekPricing {
         return weekend;
     }
 
-    /** 发起一次 HTTP 请求并解析 data 节点，失败返回 null。 */
+    /**
+     * 发起一次 HTTP 请求并解析 data 节点，失败返回 null。
+     * <p>先按常规方式连接；若失败（常见于本机 IPv6 不通而域名解析优先返回
+     * IPv6 地址，表现为 Connect/Read timed out），再改用 IPv4 地址重试。
+     * <p>一旦 IPv4 重试成功过，后续请求直接走 IPv4，避免每次都白等一次超时。
+     */
     private static JsonObject fetchHolidayData(LocalDate date) throws Exception {
+        String path = "/holidays/date/" + date;
+
+        if (preferIpv4) {
+            try {
+                return parseData(getViaIpv4(HOLIDAY_HOST, path));
+            } catch (Exception e) {
+                // IPv4 也失败时退回常规方式再试一次
+                return parseData(get(HOLIDAY_HOST, path));
+            }
+        }
+
+        Exception firstFailure;
+        try {
+            return parseData(get(HOLIDAY_HOST, path));
+        } catch (Exception e) {
+            firstFailure = e;
+        }
+        // 常规方式失败，改用 IPv4 直连重试；SNI 与证书校验仍使用域名
+        try {
+            JsonObject data = parseData(getViaIpv4(HOLIDAY_HOST, path));
+            preferIpv4 = true;
+            return data;
+        } catch (Exception e) {
+            System.err.println("[VerityConfig] IPv4 重试仍失败: " + e.getMessage());
+            throw firstFailure;
+        }
+    }
+
+    /** 从响应正文中取出 data 节点，格式不符时返回 null。 */
+    private static JsonObject parseData(String body) {
+        if (body == null) return null;
+        JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+        if (!root.has("data") || !root.get("data").isJsonObject()) return null;
+        return root.getAsJsonObject("data");
+    }
+
+    /** 常规 HTTP 请求，返回响应正文。 */
+    private static String get(String host, String path) throws IOException {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(HOLIDAY_API + date);
-            conn = (HttpURLConnection) url.openConnection();
+            conn = (HttpURLConnection) new URL("https://" + host + path).openConnection();
             conn.setRequestMethod("GET");
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setRequestProperty("Accept", "application/json");
-
             if (conn.getResponseCode() != 200) return null;
-
-            StringBuilder sb = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    sb.append(line);
-                }
-            }
-
-            JsonObject root = JsonParser.parseString(sb.toString()).getAsJsonObject();
-            if (!root.has("data") || !root.get("data").isJsonObject()) return null;
-            return root.getAsJsonObject("data");
+            return readAll(conn.getInputStream());
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    /**
+     * 用 IPv4 地址直连并发起 HTTPS 请求。
+     * <p>先以 IPv4 地址建立普通 socket，再用域名包装成 SSL socket，
+     * 使 SNI 与证书校验都针对域名，从而保持证书校验有效。
+     */
+    private static String getViaIpv4(String host, String path) throws IOException {
+        InetAddress ipv4 = null;
+        for (InetAddress address : InetAddress.getAllByName(host)) {
+            if (address instanceof Inet4Address) {
+                ipv4 = address;
+                break;
+            }
+        }
+        if (ipv4 == null) throw new IOException("域名无 IPv4 地址");
+
+        Socket plain = new Socket();
+        SSLSocket ssl = null;
+        try {
+            plain.connect(new InetSocketAddress(ipv4, 443), CONNECT_TIMEOUT_MS);
+            // getDefault() 的声明返回类型是 SocketFactory，
+            // 需转型后才能调用 SSLSocketFactory 的 createSocket(Socket, ...) 重载
+            SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            ssl = (SSLSocket) factory.createSocket(plain, host, 443, true);
+            ssl.setSoTimeout(READ_TIMEOUT_MS);
+            ssl.startHandshake();
+
+            // 该接口返回 Content-Length 且 Connection: close，无需处理分块编码
+            String request = "GET " + path + " HTTP/1.1\r\n"
+                    + "Host: " + host + "\r\n"
+                    + "Accept: application/json\r\n"
+                    + "Connection: close\r\n\r\n";
+            ssl.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+            ssl.getOutputStream().flush();
+
+            String raw = readAll(ssl.getInputStream());
+            int headerEnd = raw.indexOf("\r\n\r\n");
+            if (headerEnd < 0) return null;
+            String statusLine = raw.substring(0, raw.indexOf("\r\n"));
+            if (!statusLine.contains(" 200 ")) return null;
+            return raw.substring(headerEnd + 4);
+        } finally {
+            if (ssl != null) {
+                try { ssl.close(); } catch (IOException ignored) {}
+            } else {
+                try { plain.close(); } catch (IOException ignored) {}
+            }
+        }
+    }
+
+    /** 读取流中的全部文本。 */
+    private static String readAll(InputStream in) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+        }
+        return sb.toString();
     }
 
     // ---------- 时段判断 ----------
