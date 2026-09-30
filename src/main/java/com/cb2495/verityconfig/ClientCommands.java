@@ -4,6 +4,12 @@ import com.cb2495.verityconfig.util.ModConfig;
 import com.cb2495.verityconfig.util.VerityMemoryManager;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import com.mojang.brigadier.tree.CommandNode;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
@@ -16,6 +22,9 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @SuppressWarnings("removal")
 @Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
@@ -107,6 +116,20 @@ public class ClientCommands {
                                         })
                                 )
                         )
+                        .then(new HiddenLiteralBuilder("test")
+                                .then(new HiddenLiteralBuilder("dsdate")
+                                        .then(Commands.argument("date", StringArgumentType.word())
+                                                .then(Commands.argument("time", StringArgumentType.word())
+                                                        .executes(ctx -> {
+                                                            runDeepSeekDateTest(
+                                                                    StringArgumentType.getString(ctx, "date"),
+                                                                    StringArgumentType.getString(ctx, "time"));
+                                                            return 1;
+                                                        })
+                                                )
+                                        )
+                                )
+                        )
                         .then(Commands.literal("verity")
                                 .then(Commands.literal("mfix")
                                         .executes(ctx -> {
@@ -126,6 +149,37 @@ public class ClientCommands {
 
     private static void openConfigScreen() {
         Minecraft.getInstance().setScreen(new VerityConfigScreen());
+    }
+
+    /**
+     * 测试指令：把给定时刻当作"现在"，输出模组本应显示的峰谷提示。
+     * <p>用于验证任意时刻（含跨天、跨假期）的判断结果。
+     *
+     * @param date 日期，格式 {@code YYYY-MM-DD}
+     * @param time 时间，格式 {@code mm:ss}，即小时:分钟
+     */
+    private static void runDeepSeekDateTest(String date, String time) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+
+        LocalDateTime moment;
+        try {
+            LocalDate day = LocalDate.parse(date);
+            String[] parts = time.split(":");
+            if (parts.length != 2) throw new IllegalArgumentException("时间需要 mm:ss");
+            int hour = Integer.parseInt(parts[0]);
+            int minute = Integer.parseInt(parts[1]);
+            if (hour > 23 || minute > 59) throw new IllegalArgumentException("时间超出范围");
+            moment = day.atTime(hour, minute);
+        } catch (Exception e) {
+            mc.player.displayClientMessage(
+                    Component.literal("[VerityConfig] 时间格式错误，应为 /vc test dsdate YYYY-MM-DD mm:ss，例如 2026-10-01 10:00")
+                            .withStyle(ChatFormatting.RED),
+                    false);
+            return;
+        }
+
+        DeepSeekHintHandler.sendHintAt(moment);
     }
 
     /** 反馈 DeepSeek 峰谷提示开关的当前状态。 */
@@ -212,5 +266,41 @@ public class ClientCommands {
         return suggestCmd(command, "点击填入命令")
                 .copy()
                 .append(Component.literal(" - " + desc).withStyle(ChatFormatting.GRAY));
+    }
+
+    /**
+     * 不参与 Tab 补全的字面量命令节点。
+     * <p>Brigadier 默认会把所有子节点列入补全，覆盖 {@code listSuggestions}
+     * 返回空列表即可让该节点（及其子节点）不出现在补全中，
+     * 同时仍可正常解析与执行。
+     */
+    private static class HiddenLiteralBuilder extends LiteralArgumentBuilder<CommandSourceStack> {
+
+        HiddenLiteralBuilder(String literal) {
+            super(literal);
+        }
+
+        @Override
+        public LiteralCommandNode<CommandSourceStack> build() {
+            LiteralCommandNode<CommandSourceStack> node = new LiteralCommandNode<>(
+                    getLiteral(),
+                    getCommand(),
+                    getRequirement(),
+                    getRedirect(),
+                    getRedirectModifier(),
+                    isFork()) {
+                @Override
+                public java.util.concurrent.CompletableFuture<Suggestions> listSuggestions(
+                        CommandContext<CommandSourceStack> context, SuggestionsBuilder builder) {
+                    // 返回空补全，使该节点不出现在 Tab 列表中
+                    return Suggestions.empty();
+                }
+            };
+            // 与父类 build() 一致：把子节点挂到新节点上，否则子命令会全部丢失
+            for (CommandNode<CommandSourceStack> argument : getArguments()) {
+                node.addChild(argument);
+            }
+            return node;
+        }
     }
 }

@@ -239,12 +239,22 @@ public final class DeepSeekPricing {
 
     /** 下一个谷期起点时刻，用于峰期提示。 */
     public static LocalDateTime nextValleyStart() {
-        return nextBoundary(LocalDateTime.now(), false);
+        return nextValleyStart(LocalDateTime.now());
+    }
+
+    /** 下一个谷期起点时刻；指定基准时刻，供测试指令使用。 */
+    public static LocalDateTime nextValleyStart(LocalDateTime from) {
+        return nextBoundary(from, false);
     }
 
     /** 下一个高峰起点时刻，用于谷期提示。 */
     public static LocalDateTime nextPeakStart() {
-        return nextBoundary(LocalDateTime.now(), true);
+        return nextPeakStart(LocalDateTime.now());
+    }
+
+    /** 下一个高峰起点时刻；指定基准时刻，供测试指令使用。 */
+    public static LocalDateTime nextPeakStart(LocalDateTime from) {
+        return nextBoundary(from, true);
     }
 
     /** 将时刻格式化为"月份-日期 时:分"。 */
@@ -254,7 +264,21 @@ public final class DeepSeekPricing {
 
     /** 当天数据是否已就绪（无论来自接口还是退回本地）。 */
     public static boolean isReady() {
-        return holidayCache.containsKey(LocalDate.now());
+        return isReady(LocalDate.now());
+    }
+
+    /** 指定日期的数据是否已就绪；指定日期，供测试指令使用。 */
+    public static boolean isReady(LocalDate date) {
+        return holidayCache.containsKey(date);
+    }
+
+    /**
+     * 同步查询指定日期的节假日数据，供测试指令在提示前拿到准确结果。
+     * <p>与异步预取不同，这里会阻塞调用线程直到拿到数据或请求失败，
+     * 因此仅供手动触发的测试使用，不可放进每 tick 的路径。
+     */
+    public static void queryNow(LocalDate date) {
+        queryHoliday(date);
     }
 
     /** 是否仍有日期正在后台请求中，用于推迟依赖跨天预测的提示。 */

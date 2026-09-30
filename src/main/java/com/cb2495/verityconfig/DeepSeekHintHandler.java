@@ -16,6 +16,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * DeepSeek 峰谷时段提示。
@@ -130,6 +131,45 @@ public class DeepSeekHintHandler {
             // 关闭时清掉待发送的提示，避免关闭后仍弹出一条
             pendingHint = false;
             pendingTicks = 0;
+        }
+    }
+
+    /**
+     * 按指定时刻输出一次提示，供 {@code /vc test dsdate} 测试指令使用。
+     * <p>不改变模组的真实时段状态，也不受开关与提供商限制，
+     * 便于在任意时刻（含跨天、跨假期）验证提示内容。
+     * <p>该日期与随后数天的数据会同步取回，因此可能造成短暂卡顿，
+     * 仅适合手动触发。
+     *
+     * @param moment 作为"当前时刻"的测试时间
+     */
+    public static void sendHintAt(LocalDateTime moment) {
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null) return;
+
+        // 同步取到该日期及其后数日的数据，避免用周末估算得出错误结论
+        DeepSeekPricing.queryNow(moment.toLocalDate());
+
+        boolean peak = DeepSeekPricing.isPeakAt(moment);
+        if (peak) {
+            String next = DeepSeekPricing.format(DeepSeekPricing.nextValleyStart(moment));
+            player.displayClientMessage(
+                    Component.literal("[提示]").withStyle(ChatFormatting.YELLOW)
+                            .append(Component.literal("当前时间段为Deepseek计价峰期，可能会造成不必要的金钱开销，下一个谷期在 ")
+                                    .withStyle(ChatFormatting.RED))
+                            .append(Component.literal(next).withStyle(ChatFormatting.GOLD))
+                            .append(Component.literal("。").withStyle(ChatFormatting.RED)),
+                    false);
+        } else {
+            String next = DeepSeekPricing.format(DeepSeekPricing.nextPeakStart(moment));
+            player.displayClientMessage(
+                    Component.literal("[提示]").withStyle(ChatFormatting.YELLOW)
+                            .append(Component.literal("当前时间段为Deepseek计价谷期，可以在 ")
+                                    .withStyle(ChatFormatting.GREEN))
+                            .append(Component.literal(next).withStyle(ChatFormatting.GOLD))
+                            .append(Component.literal(" 前低价游玩").withStyle(ChatFormatting.GREEN)),
+                    false);
         }
     }
 
