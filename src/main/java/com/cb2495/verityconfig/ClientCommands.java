@@ -1,5 +1,6 @@
 package com.cb2495.verityconfig;
 
+import com.cb2495.verityconfig.util.ModConfig;
 import com.cb2495.verityconfig.util.VerityMemoryManager;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -81,6 +82,31 @@ public class ClientCommands {
                                     return 1;
                                 })
                         )
+                        .then(Commands.literal("dshint")
+                                .executes(ctx -> {
+                                    boolean next = !ModConfig.isShowDeepSeekHint();
+                                    ModConfig.setShowDeepSeekHint(next);
+                                    DeepSeekHintHandler.refreshToggle();
+                                    sendToggleMessage(next);
+                                    return 1;
+                                })
+                                .then(Commands.literal("on")
+                                        .executes(ctx -> {
+                                            ModConfig.setShowDeepSeekHint(true);
+                                            DeepSeekHintHandler.refreshToggle();
+                                            sendToggleMessage(true);
+                                            return 1;
+                                        })
+                                )
+                                .then(Commands.literal("off")
+                                        .executes(ctx -> {
+                                            ModConfig.setShowDeepSeekHint(false);
+                                            DeepSeekHintHandler.refreshToggle();
+                                            sendToggleMessage(false);
+                                            return 1;
+                                        })
+                                )
+                        )
                         .then(Commands.literal("verity")
                                 .then(Commands.literal("mfix")
                                         .executes(ctx -> {
@@ -100,6 +126,20 @@ public class ClientCommands {
 
     private static void openConfigScreen() {
         Minecraft.getInstance().setScreen(new VerityConfigScreen());
+    }
+
+    /** 反馈 DeepSeek 峰谷提示开关的当前状态。 */
+    private static void sendToggleMessage(boolean enabled) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+
+        mc.player.displayClientMessage(
+                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                        .append(Component.literal("DeepSeek 峰谷时段提示已").withStyle(ChatFormatting.WHITE))
+                        .append(Component.literal(enabled ? "开启" : "关闭")
+                                .withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.RED))
+                        .append(Component.literal("。").withStyle(ChatFormatting.WHITE)),
+                false);
     }
 
     private static void showHelpPrompt() {
@@ -125,6 +165,7 @@ public class ClientCommands {
         mc.player.displayClientMessage(suggestLine("/vc modls", "打开模组管理界面"), false);
         mc.player.displayClientMessage(suggestLine("/vc help", "查看此列表"), false);
         mc.player.displayClientMessage(suggestLine("/vc qanda", "打开常见问题解答"), false);
+        mc.player.displayClientMessage(suggestLine("/vc dshint", "开关 DeepSeek 峰谷时段提示"), false);
         mc.player.displayClientMessage(suggestLine("/vc verity mfix", "修复 Verity 的聊天记忆（移除空 AI 消息）"), false);
         mc.player.displayClientMessage(suggestLine("/vc verity mdel", "删除记忆文件（让 Verity 重新生成）"), false);
     }
