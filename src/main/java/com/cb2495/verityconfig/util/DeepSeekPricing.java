@@ -5,10 +5,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.Inet4Address;
@@ -71,6 +70,9 @@ public final class DeepSeekPricing {
     /** 读取超时（毫秒）。 */
     private static final int READ_TIMEOUT_MS = 5000;
 
+    /** 请求失败后的重试间隔（毫秒），避免接口临时不可用时一直拿不到数据。 */
+    private static final long RETRY_INTERVAL_MS = 30_000L;
+
     /** 高峰上午段起点。 */
     private static final LocalTime MORNING_START = LocalTime.of(9, 0);
     /** 高峰上午段终点。 */
@@ -86,6 +88,8 @@ public final class DeepSeekPricing {
     private static final Map<LocalDate, Boolean> holidayCache = new ConcurrentHashMap<>();
     /** 当天已尝试过请求的标记，避免接口失败后每 tick 重复发起请求。 */
     private static volatile LocalDate todayAttempted = null;
+    /** 上次发起请求的时刻，用于控制失败后的重试间隔。 */
+    private static volatile long lastAttemptAt = 0L;
     /** 是否有批量请求正在进行中。 */
     private static volatile boolean bulkPrefetching = false;
     /** 常规连接失败、IPv4 重试成功后置位，后续请求直接走 IPv4。 */
@@ -96,18 +100,22 @@ public final class DeepSeekPricing {
     /**
      * 拉取当天起 {@link #PREFETCH_DAYS} 天的节假日数据并写入缓存。
      * <p>接口支持批量查询，因此无论多少天都只发一次请求。
-     * <p>当天只尝试一次：接口失败后不再重复请求，直接沿用周末判断。
-     * 跨天后 {@code todayAttempted} 不再匹配，会重新拉取。
+     * <p>成功当天不再重复请求；失败则隔 {@link #RETRY_INTERVAL_MS} 后允许重试，
+     * 避免接口临时不可用时一直拿不到数据，也避免每 tick 都去请求。
      */
     public static void refreshIfNeeded() {
         LocalDate today = LocalDate.now();
+        boolean alreadyTried = today.equals(todayAttempted);
+        boolean cooling = System.currentTimeMillis() - lastAttemptAt < RETRY_INTERVAL_MS;
         debug("refreshIfNeeded：今天 " + today
                 + "，缓存已含今天=" + holidayCache.containsKey(today)
-                + "，今天已尝试过=" + today.equals(todayAttempted));
+                + "，今天已尝试过=" + alreadyTried
+                + "，距上次尝试 " + (System.currentTimeMillis() - lastAttemptAt) + "ms");
         if (holidayCache.containsKey(today)) return;
-        if (today.equals(todayAttempted)) return;
-        todayAttempted = today;
+        if (alreadyTried && cooling) return;
 
+        todayAttempted = today;
+        lastAttemptAt = System.currentTimeMillis();
         CompletableFuture.runAsync(() -> fetchRangeFrom(today));
     }
 
@@ -295,7 +303,9 @@ public final class DeepSeekPricing {
             out.flush();
             debug("IPv4 请求已发出，请求体=" + json);
 
-            String raw = readAll(ssl.getInputStream());
+            // 必须按字节读取：readLine 会吃掉换行符，导致找不到头部与正文的分界
+            byte[] rawBytes = readAllBytes(ssl.getInputStream());
+            String raw = new String(rawBytes, StandardCharsets.ISO_8859_1);
             int headerEnd = raw.indexOf("\r\n\r\n");
             if (headerEnd < 0) {
                 debug("IPv4 响应无响应头，原始内容：" + raw);
@@ -303,11 +313,14 @@ public final class DeepSeekPricing {
             }
             String statusLine = raw.substring(0, raw.indexOf("\r\n"));
             debug("IPv4 状态行：" + statusLine);
+            // 正文字节按 UTF-8 解码；头部按 ISO-8859-1 处理，保证下标与字节一一对应
+            byte[] bodyOnly = new byte[rawBytes.length - (headerEnd + 4)];
+            System.arraycopy(rawBytes, headerEnd + 4, bodyOnly, 0, bodyOnly.length);
             if (!statusLine.contains(" 200 ")) {
-                debug("IPv4 非 200 响应正文：" + raw.substring(headerEnd + 4));
+                debug("IPv4 非 200 响应正文：" + new String(bodyOnly, StandardCharsets.UTF_8));
                 return null;
             }
-            return raw.substring(headerEnd + 4);
+            return new String(bodyOnly, StandardCharsets.UTF_8);
         } finally {
             if (ssl != null) {
                 try { ssl.close(); } catch (IOException ignored) {}
@@ -320,15 +333,19 @@ public final class DeepSeekPricing {
     /** 读取流中的全部文本；流为 null 时返回空串。 */
     private static String readAll(InputStream in) throws IOException {
         if (in == null) return "";
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-            }
+        return new String(readAllBytes(in), StandardCharsets.UTF_8);
+    }
+
+    /** 读取流中的全部字节；流为 null 时返回空数组。 */
+    private static byte[] readAllBytes(InputStream in) throws IOException {
+        if (in == null) return new byte[0];
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int read;
+        while ((read = in.read(chunk)) != -1) {
+            buffer.write(chunk, 0, read);
         }
-        return sb.toString();
+        return buffer.toByteArray();
     }
 
     // ---------- 时段判断 ----------
