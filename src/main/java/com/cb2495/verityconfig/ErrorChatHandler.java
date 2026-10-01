@@ -46,8 +46,9 @@ public class ErrorChatHandler {
         }
 
         // 通用错误：记忆文件错误（所有 AI 通用）
-        String code = getCode(json);
-        if ("invalid_request_error".equals(code)) {
+        // 这类报错的 code 一律是 invalid_request_error，无法区分具体原因，
+        // 只能靠 message 中的关键词判断。
+        if (isMemoryBrokenError(getMessage(json))) {
             sendMemoryRestoreHint();
             return;
         }
@@ -97,6 +98,22 @@ public class ErrorChatHandler {
             if (error.has("message")) return error.get("message").getAsString();
         }
         return json.has("message") ? json.get("message").getAsString() : "";
+    }
+
+    /**
+     * 判断是否为记忆文件损坏导致的请求结构错误。
+     * <p>
+     * 典型报错：
+     * An assistant message with 'tool_calls' must be followed by tool messages
+     * responding to each 'tool_call_id'.
+     * <p>
+     * 这类报错的 code 固定为 invalid_request_error，但同一个 code 也用于其他
+     * 请求参数错误，因此必须靠 message 内容区分，否则会把无关错误误判成记忆损坏。
+     */
+    private static boolean isMemoryBrokenError(String message) {
+        if (message == null || message.isEmpty()) return false;
+        return message.contains("tool_calls")
+                && message.contains("must be followed by tool messages");
     }
 
     // ---------- 提供商处理 ----------

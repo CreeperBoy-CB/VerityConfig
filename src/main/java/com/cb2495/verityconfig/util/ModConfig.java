@@ -17,9 +17,13 @@ public final class ModConfig {
 
     private static final String SECTION = "[General]";
     private static final String SHOW_SPONSOR = "ShowSponsor";
+    private static final String SHOW_DEEPSEEK_HINT = "ShowDeepSeekHint";
 
     /** 赞助码显示开关的默认值。 */
     private static final boolean DEFAULT_SHOW_SPONSOR = true;
+
+    /** DeepSeek 峰谷时段提示的默认值。 */
+    private static final boolean DEFAULT_SHOW_DEEPSEEK_HINT = true;
 
     /** 配置文件路径，运行时解析（字段初始化早于 Screen 构造，不能提前取实例）。 */
     private static Path configFile() {
@@ -33,6 +37,7 @@ public final class ModConfig {
     public static void createDefaultIfMissing() {
         if (Files.exists(configFile())) return;
         setShowSponsor(DEFAULT_SHOW_SPONSOR);
+        setShowDeepSeekHint(DEFAULT_SHOW_DEEPSEEK_HINT);
     }
 
     /**
@@ -67,6 +72,39 @@ public final class ModConfig {
             lines.add(SECTION);
         }
         ConfigFileUtils.replaceOrAddRaw(lines, SHOW_SPONSOR, String.valueOf(value), SECTION);
+        ConfigFileUtils.writeLines(file, lines);
+    }
+
+    /**
+     * 是否显示 DeepSeek 峰谷时段提示。默认 {@code true}。
+     * <p>配置项缺失或读取失败时返回默认值。
+     */
+    public static boolean isShowDeepSeekHint() {
+        Path file = configFile();
+        if (!Files.exists(file)) return DEFAULT_SHOW_DEEPSEEK_HINT;
+        try {
+            List<String> lines = Files.readAllLines(file);
+            for (String line : lines) {
+                if (ConfigFileUtils.lineMatchesKey(line, SHOW_DEEPSEEK_HINT)) {
+                    return ConfigFileUtils.parseBoolean(line);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[VerityConfig] 读取 " + file + " 失败: " + e.getMessage());
+        }
+        return DEFAULT_SHOW_DEEPSEEK_HINT;
+    }
+
+    /** 写入 ShowDeepSeekHint；文件或段落不存在时自动创建。 */
+    public static void setShowDeepSeekHint(boolean value) {
+        Path file = configFile();
+        List<String> lines = ConfigFileUtils.readLines(file);
+        boolean hasSection = lines.stream().anyMatch(l -> l.trim().equals(SECTION));
+        if (!hasSection) {
+            if (!lines.isEmpty()) lines.add("");
+            lines.add(SECTION);
+        }
+        ConfigFileUtils.replaceOrAddRaw(lines, SHOW_DEEPSEEK_HINT, String.valueOf(value), SECTION);
         ConfigFileUtils.writeLines(file, lines);
     }
 }
