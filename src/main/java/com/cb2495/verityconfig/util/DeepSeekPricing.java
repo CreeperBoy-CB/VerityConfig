@@ -53,6 +53,19 @@ public final class DeepSeekPricing {
     /** 每次请求取多少天；一次可覆盖春节等最长假期，且仍只发一次请求。 */
     private static final int PREFETCH_DAYS = 30;
 
+    /** 是否输出调试日志，排查接口与日期问题时开启。 */
+    private static final boolean DEBUG_LOG = true;
+
+    /** 输出调试日志。 */
+    private static void debug(String message) {
+        if (DEBUG_LOG) System.out.println("[VerityConfig/节假日] " + message);
+    }
+
+    /** 供提示逻辑复用的调试输出，统一前缀便于过滤。 */
+    public static void debugHint(String message) {
+        debug("提示：" + message);
+    }
+
     /** 连接超时（毫秒）。IPv6 不通时首个请求会在此时间后失败并转入 IPv4 重试。 */
     private static final int CONNECT_TIMEOUT_MS = 5000;
     /** 读取超时（毫秒）。 */
@@ -88,6 +101,9 @@ public final class DeepSeekPricing {
      */
     public static void refreshIfNeeded() {
         LocalDate today = LocalDate.now();
+        debug("refreshIfNeeded：今天 " + today
+                + "，缓存已含今天=" + holidayCache.containsKey(today)
+                + "，今天已尝试过=" + today.equals(todayAttempted));
         if (holidayCache.containsKey(today)) return;
         if (today.equals(todayAttempted)) return;
         todayAttempted = today;
@@ -103,32 +119,61 @@ public final class DeepSeekPricing {
      * @param start 起始日期
      */
     private static void fetchRangeFrom(LocalDate start) {
-        if (bulkPrefetching) return;
+        if (bulkPrefetching) {
+            debug("已有请求进行中，跳过本次（起始 " + start + "）");
+            return;
+        }
         bulkPrefetching = true;
+        long beganAt = System.currentTimeMillis();
         try {
+            debug("开始请求：起始 " + start + "，共 " + PREFETCH_DAYS + " 天");
             String body = fetchBatch(start, PREFETCH_DAYS);
-            if (body == null) return;
+            debug("请求返回：耗时 " + (System.currentTimeMillis() - beganAt) + "ms，"
+                    + (body == null ? "正文为空" : "正文长度 " + body.length()));
+            if (body == null) {
+                debug("正文为空（非 200 或连接失败），本次不写入缓存");
+                return;
+            }
+            debug("响应正文：" + body);
+
             JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-            if (!root.has("data") || !root.get("data").isJsonArray()) return;
+            if (!root.has("data") || !root.get("data").isJsonArray()) {
+                debug("响应缺少 data 数组，本次不写入缓存");
+                return;
+            }
+            int written = 0;
             for (JsonElement element : root.getAsJsonArray("data")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject item = element.getAsJsonObject();
-                if (!item.has("date") || !item.has("isHoliday")) continue;
+                if (!item.has("date") || !item.has("isHoliday")) {
+                    debug("跳过缺少 date/isHoliday 的条目：" + item);
+                    continue;
+                }
                 LocalDate date;
                 try {
                     date = LocalDate.parse(item.get("date").getAsString());
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    debug("跳过无法解析的日期：" + item.get("date"));
                     continue;
                 }
                 boolean isHoliday = item.get("isHoliday").getAsBoolean();
                 // 调休上班的周末 isHoliday 为 false、isWorkday 为 true，
                 // 但规则要求调休周末仍按空闲时段计费，故必须叠加周末判断
-                holidayCache.put(date, isHoliday || isWeekend(date));
+                boolean rest = isHoliday || isWeekend(date);
+                holidayCache.put(date, rest);
+                written++;
+                debug("  " + date + " (" + date.getDayOfWeek() + ") isHoliday=" + isHoliday
+                        + " " + date.getDayOfWeek() + "是否为周末=" + isWeekend(date)
+                        + " -> 空闲日=" + rest);
             }
+            debug("写入缓存 " + written + " 天");
         } catch (Exception e) {
+            debug("请求异常：" + e);
             System.err.println("[VerityConfig] 查询节假日失败，退回本地判断: " + e.getMessage());
         } finally {
             bulkPrefetching = false;
+            debug("本次请求结束，用时 " + (System.currentTimeMillis() - beganAt) + "ms，"
+                    + "缓存共 " + holidayCache.size() + " 天");
         }
     }
 
@@ -148,35 +193,43 @@ public final class DeepSeekPricing {
         String json = payload.toString();
 
         if (preferIpv4) {
+            debug("走 IPv4 直连（此前 IPv4 重试成功过）");
             try {
                 return postViaIpv4(HOLIDAY_HOST, BATCH_PATH, json);
             } catch (Exception e) {
+                debug("IPv4 直连失败，退回常规方式：" + e);
                 // IPv4 也失败时退回常规方式再试一次
                 return post(HOLIDAY_HOST, BATCH_PATH, json);
             }
         }
 
+        debug("走常规连接");
         Exception firstFailure;
         try {
             return post(HOLIDAY_HOST, BATCH_PATH, json);
         } catch (Exception e) {
             firstFailure = e;
+            debug("常规连接失败：" + e);
         }
         // 常规方式失败，改用 IPv4 直连重试；SNI 与证书校验仍使用域名
+        debug("改用 IPv4 直连重试");
         try {
             String body = postViaIpv4(HOLIDAY_HOST, BATCH_PATH, json);
             preferIpv4 = true;
+            debug("IPv4 重试成功，后续请求将直接走 IPv4");
             return body;
         } catch (Exception e) {
+            debug("IPv4 重试仍失败：" + e);
             System.err.println("[VerityConfig] IPv4 重试仍失败: " + e.getMessage());
             throw firstFailure;
         }
     }
 
-    /** 常规 HTTP POST 请求，返回响应正文。 */
+    /** 常规 HTTP POST 请求，返回响应正文；非 200 返回 null。 */
     private static String post(String host, String path, String json) throws IOException {
         HttpURLConnection conn = null;
         try {
+            debug("POST https://" + host + path + " 请求体=" + json);
             conn = (HttpURLConnection) new URL("https://" + host + path).openConnection();
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
@@ -187,7 +240,13 @@ public final class DeepSeekPricing {
             try (OutputStream out = conn.getOutputStream()) {
                 out.write(json.getBytes(StandardCharsets.UTF_8));
             }
-            if (conn.getResponseCode() != 200) return null;
+            int code = conn.getResponseCode();
+            debug("HTTP 状态 " + code);
+            if (code != 200) {
+                // 非 200 时正文里通常有接口给出的原因，读出来便于排查
+                debug("非 200 响应正文：" + readAll(conn.getErrorStream()));
+                return null;
+            }
             return readAll(conn.getInputStream());
         } finally {
             if (conn != null) conn.disconnect();
@@ -208,6 +267,7 @@ public final class DeepSeekPricing {
             }
         }
         if (ipv4 == null) throw new IOException("域名无 IPv4 地址");
+        debug("解析到 IPv4 地址 " + ipv4.getHostAddress());
 
         byte[] bodyBytes = json.getBytes(StandardCharsets.UTF_8);
         Socket plain = new Socket();
@@ -220,6 +280,7 @@ public final class DeepSeekPricing {
             ssl = (SSLSocket) factory.createSocket(plain, host, 443, true);
             ssl.setSoTimeout(READ_TIMEOUT_MS);
             ssl.startHandshake();
+            debug("TLS 握手完成");
 
             // 该接口返回 Content-Length 且 Connection: close，无需处理分块编码
             String header = "POST " + path + " HTTP/1.1\r\n"
@@ -232,12 +293,20 @@ public final class DeepSeekPricing {
             out.write(header.getBytes(StandardCharsets.UTF_8));
             out.write(bodyBytes);
             out.flush();
+            debug("IPv4 请求已发出，请求体=" + json);
 
             String raw = readAll(ssl.getInputStream());
             int headerEnd = raw.indexOf("\r\n\r\n");
-            if (headerEnd < 0) return null;
+            if (headerEnd < 0) {
+                debug("IPv4 响应无响应头，原始内容：" + raw);
+                return null;
+            }
             String statusLine = raw.substring(0, raw.indexOf("\r\n"));
-            if (!statusLine.contains(" 200 ")) return null;
+            debug("IPv4 状态行：" + statusLine);
+            if (!statusLine.contains(" 200 ")) {
+                debug("IPv4 非 200 响应正文：" + raw.substring(headerEnd + 4));
+                return null;
+            }
             return raw.substring(headerEnd + 4);
         } finally {
             if (ssl != null) {
@@ -248,8 +317,9 @@ public final class DeepSeekPricing {
         }
     }
 
-    /** 读取流中的全部文本。 */
+    /** 读取流中的全部文本；流为 null 时返回空串。 */
     private static String readAll(InputStream in) throws IOException {
+        if (in == null) return "";
         StringBuilder sb = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(in, StandardCharsets.UTF_8))) {
@@ -301,6 +371,7 @@ public final class DeepSeekPricing {
      * @param targetPeak true 找下一个高峰起点，false 找下一个谷期起点
      */
     private static LocalDateTime nextBoundary(LocalDateTime from, boolean targetPeak) {
+        debug("开始推算" + (targetPeak ? "下一个峰期" : "下一个谷期") + "，基准时刻 " + from);
         // 以分钟为步长向未来搜索，最多 8 天，足以覆盖任意节假日连休
         LocalDateTime cursor = from.withSecond(0).withNano(0).plusMinutes(1);
         int limit = 8 * 24 * 60;
@@ -311,16 +382,26 @@ public final class DeepSeekPricing {
             LocalDate cursorDate = cursor.toLocalDate();
             if (!cursorDate.equals(scannedDate)) {
                 scannedDate = cursorDate;
+                if (!holidayCache.containsKey(cursorDate)) {
+                    debug("推算跨入未缓存日期 " + cursorDate + "（"
+                            + cursorDate.getDayOfWeek() + "），本次按周末估算");
+                }
                 prefetchFrom(cursorDate);
             }
             boolean peak = isPeakAt(cursor);
             // 状态发生跨越：谷->峰 得到高峰起点，峰->谷 得到谷期起点
             if (peak != currentPeak) {
-                if (peak == targetPeak) return cursor;
+                if (peak == targetPeak) {
+                    debug("推算结果：" + cursor + "（"
+                            + (holidayCache.containsKey(cursor.toLocalDate()) ? "该日数据来自缓存" : "该日按周末估算")
+                            + "）");
+                    return cursor;
+                }
                 currentPeak = peak;
             }
             cursor = cursor.plusMinutes(1);
         }
+        debug("推算未找到切换点，返回基准时刻 " + from);
         return from;
     }
 

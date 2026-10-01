@@ -185,6 +185,7 @@ public class DeepSeekHintHandler {
 
         if (peak) {
             String next = DeepSeekPricing.format(DeepSeekPricing.nextValleyStart());
+            DeepSeekPricing.debugHint("发送峰期提示，下一个谷期 " + next);
             player.displayClientMessage(
                     Component.literal("[提示]").withStyle(ChatFormatting.YELLOW)
                             .append(Component.literal("当前时间段为Deepseek计价峰期，可能会造成不必要的金钱开销，下一个谷期在 ")
@@ -194,6 +195,7 @@ public class DeepSeekHintHandler {
                     false);
         } else {
             String next = DeepSeekPricing.format(DeepSeekPricing.nextPeakStart());
+            DeepSeekPricing.debugHint("发送谷期提示，下一个峰期 " + next);
             player.displayClientMessage(
                     Component.literal("[提示]").withStyle(ChatFormatting.YELLOW)
                             .append(Component.literal("当前时间段为Deepseek计价谷期，可以在 ")
