@@ -134,13 +134,12 @@ public class DeepSeekHintHandler {
     }
 
     /**
-     * 按指定时刻输出一次提示，供 {@code /vc test dsdate} 测试指令使用。
+     * 按指定时刻输出一次提示，供 {@code /vc dshint date} 使用。
      * <p>不改变模组的真实时段状态，也不受开关与提供商限制，
-     * 便于在任意时刻（含跨天、跨假期）验证提示内容。
-     * <p>该日期与随后数天的数据会同步取回，因此可能造成短暂卡顿，
-     * 仅适合手动触发。
+     * 便于在任意时刻（含跨天、跨假期）查看提示内容。
+     * <p>数据缺失时会同步取回，造成短暂卡顿；已有缓存则直接使用。
      *
-     * @param moment 作为"当前时刻"的测试时间
+     * @param moment 作为"当前时刻"的时间
      */
     public static void sendHintAt(LocalDateTime moment) {
         Minecraft mc = Minecraft.getInstance();

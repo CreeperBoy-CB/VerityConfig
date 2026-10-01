@@ -451,11 +451,16 @@ public final class DeepSeekPricing {
     }
 
     /**
-     * 同步查询指定日期的节假日数据，供测试指令在提示前拿到准确结果。
+     * 同步查询指定日期的节假日数据，供 {@code /vc dshint date} 在提示前拿到准确结果。
      * <p>会批量取该日期起 {@link #PREFETCH_DAYS} 天，因此阻塞调用线程，
-     * 仅供手动触发的测试使用，不可放进每 tick 的路径。
+     * 仅供手动触发的查询使用，不可放进每 tick 的路径。
+     * <p>该日期已有缓存时直接返回，避免每次查询都发一次网络请求。
      */
     public static void queryNow(LocalDate date) {
+        if (holidayCache.containsKey(date)) {
+            debug("查询 " + date + "：已有缓存，跳过请求");
+            return;
+        }
         fetchRangeFrom(date);
     }
 
