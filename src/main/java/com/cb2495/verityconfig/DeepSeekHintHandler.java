@@ -54,10 +54,9 @@ public class DeepSeekHintHandler {
         if (!providerIsDeepSeek) return;
         if (!hintEnabled) return;
 
-        // 进入存档先刷新当天数据，并预取未来数日，供跨天预测使用
-        // 预取 10 天以覆盖春节等最长假期，避免假期被误判为工作日
+        // 进入存档时拉取当天及未来一个月的数据
+        // 批量接口一次可取一个月，足以覆盖春节等最长假期
         DeepSeekPricing.refreshIfNeeded();
-        DeepSeekPricing.prefetchUpcoming(10);
         pendingHint = true;
         pendingTicks = 20;
         extraWaitTicks = 0;

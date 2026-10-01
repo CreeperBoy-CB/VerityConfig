@@ -1,5 +1,7 @@
 package com.cb2495.verityconfig.util;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -7,6 +9,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -43,8 +46,12 @@ public final class DeepSeekPricing {
 
     private DeepSeekPricing() {}
 
-    /** 节假日查询接口域名，路径为 {@code /holidays/date/<日期>}。 */
+    /** 节假日查询接口域名。 */
     private static final String HOLIDAY_HOST = "api.apisbo.com";
+    /** 批量查询路径，POST 请求体为 {"dates":["YYYY-MM-DD", ...]}。 */
+    private static final String BATCH_PATH = "/holidays/batch";
+    /** 每次请求取多少天；一次可覆盖春节等最长假期，且仍只发一次请求。 */
+    private static final int PREFETCH_DAYS = 30;
 
     /** 连接超时（毫秒）。IPv6 不通时首个请求会在此时间后失败并转入 IPv4 重试。 */
     private static final int CONNECT_TIMEOUT_MS = 5000;
@@ -64,11 +71,9 @@ public final class DeepSeekPricing {
 
     /** 已查询过的日期 -> 是否空闲日（法定节假日或周末）。 */
     private static final Map<LocalDate, Boolean> holidayCache = new ConcurrentHashMap<>();
-    /** 正在请求中的日期，避免重复发起同一日的请求。 */
-    private static final java.util.Set<LocalDate> prefetching = ConcurrentHashMap.newKeySet();
     /** 当天已尝试过请求的标记，避免接口失败后每 tick 重复发起请求。 */
     private static volatile LocalDate todayAttempted = null;
-    /** 是否正在批量预取未来日期。 */
+    /** 是否有批量请求正在进行中。 */
     private static volatile boolean bulkPrefetching = false;
     /** 常规连接失败、IPv4 重试成功后置位，后续请求直接走 IPv4。 */
     private static volatile boolean preferIpv4 = false;
@@ -76,9 +81,10 @@ public final class DeepSeekPricing {
     // ---------- 查询与缓存 ----------
 
     /**
-     * 若当天尚未查询过，则异步拉取节假日信息。
-     * <p>网络请求放到后台线程，避免阻塞客户端主线程。
+     * 拉取当天起 {@link #PREFETCH_DAYS} 天的节假日数据并写入缓存。
+     * <p>接口支持批量查询，因此无论多少天都只发一次请求。
      * <p>当天只尝试一次：接口失败后不再重复请求，直接沿用周末判断。
+     * 跨天后 {@code todayAttempted} 不再匹配，会重新拉取。
      */
     public static void refreshIfNeeded() {
         LocalDate today = LocalDate.now();
@@ -86,92 +92,101 @@ public final class DeepSeekPricing {
         if (today.equals(todayAttempted)) return;
         todayAttempted = today;
 
-        CompletableFuture.runAsync(() -> queryHoliday(today));
+        CompletableFuture.runAsync(() -> fetchRangeFrom(today));
     }
 
     /**
-     * 查询并缓存指定日期是否为空闲日，已缓存则直接返回。
-     * <p>用于跨天预测时按需获取目标日期的真实节假日信息。
-     * <p>接口失败时本次按周末估算返回，但<b>不写入缓存</b>，
-     * 以便接口恢复后能重新查询到真实结果。
+     * 批量拉取 {@code start} 起若干天的数据并写入缓存。
+     * <p>网络请求应在后台线程调用；失败时静默退回（缓存不写入，
+     * 判断时按周末估算）。
+     *
+     * @param start 起始日期
      */
-    private static boolean queryHoliday(LocalDate date) {
-        Boolean cached = holidayCache.get(date);
-        if (cached != null) return cached;
-
-        boolean weekend = isWeekend(date);
+    private static void fetchRangeFrom(LocalDate start) {
+        if (bulkPrefetching) return;
+        bulkPrefetching = true;
         try {
-            prefetching.add(date);
-            JsonObject data = fetchHolidayData(date);
-            if (data != null && data.has("isHoliday")) {
-                boolean isHoliday = data.get("isHoliday").getAsBoolean();
+            String body = fetchBatch(start, PREFETCH_DAYS);
+            if (body == null) return;
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            if (!root.has("data") || !root.get("data").isJsonArray()) return;
+            for (JsonElement element : root.getAsJsonArray("data")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject item = element.getAsJsonObject();
+                if (!item.has("date") || !item.has("isHoliday")) continue;
+                LocalDate date;
+                try {
+                    date = LocalDate.parse(item.get("date").getAsString());
+                } catch (Exception ignored) {
+                    continue;
+                }
+                boolean isHoliday = item.get("isHoliday").getAsBoolean();
                 // 调休上班的周末 isHoliday 为 false、isWorkday 为 true，
                 // 但规则要求调休周末仍按空闲时段计费，故必须叠加周末判断
-                boolean result = isHoliday || weekend;
-                holidayCache.put(date, result);
-                return result;
+                holidayCache.put(date, isHoliday || isWeekend(date));
             }
         } catch (Exception e) {
-            System.err.println("[VerityConfig] 查询 " + date + " 节假日失败，退回本地判断: " + e.getMessage());
+            System.err.println("[VerityConfig] 查询节假日失败，退回本地判断: " + e.getMessage());
         } finally {
-            prefetching.remove(date);
+            bulkPrefetching = false;
         }
-        // 接口不可用或返回异常：仅按周末判断，且不缓存以免后续不再重试
-        return weekend;
     }
 
     /**
-     * 发起一次 HTTP 请求并解析 data 节点，失败返回 null。
+     * 发起批量查询请求，返回响应正文；失败返回 null。
      * <p>先按常规方式连接；若失败（常见于本机 IPv6 不通而域名解析优先返回
      * IPv6 地址，表现为 Connect/Read timed out），再改用 IPv4 地址重试。
      * <p>一旦 IPv4 重试成功过，后续请求直接走 IPv4，避免每次都白等一次超时。
      */
-    private static JsonObject fetchHolidayData(LocalDate date) throws Exception {
-        String path = "/holidays/date/" + date;
+    private static String fetchBatch(LocalDate start, int days) throws Exception {
+        JsonArray dates = new JsonArray();
+        for (int i = 0; i < days; i++) {
+            dates.add(start.plusDays(i).toString());
+        }
+        JsonObject payload = new JsonObject();
+        payload.add("dates", dates);
+        String json = payload.toString();
 
         if (preferIpv4) {
             try {
-                return parseData(getViaIpv4(HOLIDAY_HOST, path));
+                return postViaIpv4(HOLIDAY_HOST, BATCH_PATH, json);
             } catch (Exception e) {
                 // IPv4 也失败时退回常规方式再试一次
-                return parseData(get(HOLIDAY_HOST, path));
+                return post(HOLIDAY_HOST, BATCH_PATH, json);
             }
         }
 
         Exception firstFailure;
         try {
-            return parseData(get(HOLIDAY_HOST, path));
+            return post(HOLIDAY_HOST, BATCH_PATH, json);
         } catch (Exception e) {
             firstFailure = e;
         }
         // 常规方式失败，改用 IPv4 直连重试；SNI 与证书校验仍使用域名
         try {
-            JsonObject data = parseData(getViaIpv4(HOLIDAY_HOST, path));
+            String body = postViaIpv4(HOLIDAY_HOST, BATCH_PATH, json);
             preferIpv4 = true;
-            return data;
+            return body;
         } catch (Exception e) {
             System.err.println("[VerityConfig] IPv4 重试仍失败: " + e.getMessage());
             throw firstFailure;
         }
     }
 
-    /** 从响应正文中取出 data 节点，格式不符时返回 null。 */
-    private static JsonObject parseData(String body) {
-        if (body == null) return null;
-        JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-        if (!root.has("data") || !root.get("data").isJsonObject()) return null;
-        return root.getAsJsonObject("data");
-    }
-
-    /** 常规 HTTP 请求，返回响应正文。 */
-    private static String get(String host, String path) throws IOException {
+    /** 常规 HTTP POST 请求，返回响应正文。 */
+    private static String post(String host, String path, String json) throws IOException {
         HttpURLConnection conn = null;
         try {
             conn = (HttpURLConnection) new URL("https://" + host + path).openConnection();
-            conn.setRequestMethod("GET");
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
+            conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/json");
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(json.getBytes(StandardCharsets.UTF_8));
+            }
             if (conn.getResponseCode() != 200) return null;
             return readAll(conn.getInputStream());
         } finally {
@@ -180,11 +195,11 @@ public final class DeepSeekPricing {
     }
 
     /**
-     * 用 IPv4 地址直连并发起 HTTPS 请求。
+     * 用 IPv4 地址直连并发起 HTTPS POST 请求。
      * <p>先以 IPv4 地址建立普通 socket，再用域名包装成 SSL socket，
      * 使 SNI 与证书校验都针对域名，从而保持证书校验有效。
      */
-    private static String getViaIpv4(String host, String path) throws IOException {
+    private static String postViaIpv4(String host, String path, String json) throws IOException {
         InetAddress ipv4 = null;
         for (InetAddress address : InetAddress.getAllByName(host)) {
             if (address instanceof Inet4Address) {
@@ -194,6 +209,7 @@ public final class DeepSeekPricing {
         }
         if (ipv4 == null) throw new IOException("域名无 IPv4 地址");
 
+        byte[] bodyBytes = json.getBytes(StandardCharsets.UTF_8);
         Socket plain = new Socket();
         SSLSocket ssl = null;
         try {
@@ -206,12 +222,16 @@ public final class DeepSeekPricing {
             ssl.startHandshake();
 
             // 该接口返回 Content-Length 且 Connection: close，无需处理分块编码
-            String request = "GET " + path + " HTTP/1.1\r\n"
+            String header = "POST " + path + " HTTP/1.1\r\n"
                     + "Host: " + host + "\r\n"
+                    + "Content-Type: application/json\r\n"
                     + "Accept: application/json\r\n"
+                    + "Content-Length: " + bodyBytes.length + "\r\n"
                     + "Connection: close\r\n\r\n";
-            ssl.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
-            ssl.getOutputStream().flush();
+            OutputStream out = ssl.getOutputStream();
+            out.write(header.getBytes(StandardCharsets.UTF_8));
+            out.write(bodyBytes);
+            out.flush();
 
             String raw = readAll(ssl.getInputStream());
             int headerEnd = raw.indexOf("\r\n\r\n");
@@ -255,18 +275,6 @@ public final class DeepSeekPricing {
         return isWeekend(date);
     }
 
-    /**
-     * 预取指定时刻之后若干天的节假日信息，供跨天预测使用。
-     * <p>在后台线程串行执行，避免一次并发发起过多请求。
-     */
-    private static void prefetchRange(LocalDate from, int days) {
-        CompletableFuture.runAsync(() -> {
-            for (int i = 1; i <= days; i++) {
-                queryHoliday(from.plusDays(i));
-            }
-        });
-    }
-
     /** 当前是否处于高峰时段。 */
     public static boolean isPeak() {
         return isPeakAt(LocalDateTime.now());
@@ -287,8 +295,8 @@ public final class DeepSeekPricing {
 
     /**
      * 计算下一个时段切换时刻。
-     * <p>搜索中若遇到未缓存的日期，会在后台预取该日数据，本次仍按周末估算；
-     * 进入存档时已预取未来若干天，因此正常情况不会走到这个兜底。
+     * <p>搜索中若遇到未缓存的日期，会在后台补取，本次仍按周末估算；
+     * 进入存档时已预取未来 {@link #PREFETCH_DAYS} 天，正常不会走到这个兜底。
      *
      * @param targetPeak true 找下一个高峰起点，false 找下一个谷期起点
      */
@@ -299,11 +307,11 @@ public final class DeepSeekPricing {
         boolean currentPeak = isPeakAt(cursor.minusMinutes(1));
         LocalDate scannedDate = from.toLocalDate();
         for (int i = 0; i < limit; i++) {
-            // 搜索跨入新日期时按需预取，避免未缓存日期被按周末估算而误判
+            // 搜索跨入新日期时按需补取，避免未缓存日期被按周末估算而误判
             LocalDate cursorDate = cursor.toLocalDate();
             if (!cursorDate.equals(scannedDate)) {
                 scannedDate = cursorDate;
-                prefetch(cursorDate);
+                prefetchFrom(cursorDate);
             }
             boolean peak = isPeakAt(cursor);
             // 状态发生跨越：谷->峰 得到高峰起点，峰->谷 得到谷期起点
@@ -316,32 +324,14 @@ public final class DeepSeekPricing {
         return from;
     }
 
-    /** 预取单个日期的数据；已缓存或已在请求中时直接跳过。 */
-    private static void prefetch(LocalDate date) {
-        if (holidayCache.containsKey(date)) return;
-        if (!prefetching.add(date)) return;
-        CompletableFuture.runAsync(() -> queryHoliday(date));
-    }
-
     /**
-     * 预取从明天起若干天的数据，供跨天预测尽早拿到准确值。
-     * <p>进入存档时调用，可覆盖"周末谷期到下周一高峰"这类跨天场景。
-     * <p>串行请求，避免一次性向接口发起过多并发连接。
+     * 后台补取 {@code from} 起若干天的数据；已缓存或已在请求中时跳过。
+     * <p>供跨天预测兜底使用，数据缺失时才真正发起请求。
      */
-    public static void prefetchUpcoming(int days) {
-        LocalDate today = LocalDate.now();
-        bulkPrefetching = true;
-        CompletableFuture.runAsync(() -> {
-            try {
-                for (int i = 1; i <= days; i++) {
-                    LocalDate date = today.plusDays(i);
-                    if (holidayCache.containsKey(date)) continue;
-                    queryHoliday(date);
-                }
-            } finally {
-                bulkPrefetching = false;
-            }
-        });
+    private static void prefetchFrom(LocalDate from) {
+        if (holidayCache.containsKey(from)) return;
+        if (bulkPrefetching) return;
+        CompletableFuture.runAsync(() -> fetchRangeFrom(from));
     }
 
     /** 下一个谷期起点时刻，用于峰期提示。 */
@@ -381,15 +371,15 @@ public final class DeepSeekPricing {
 
     /**
      * 同步查询指定日期的节假日数据，供测试指令在提示前拿到准确结果。
-     * <p>与异步预取不同，这里会阻塞调用线程直到拿到数据或请求失败，
-     * 因此仅供手动触发的测试使用，不可放进每 tick 的路径。
+     * <p>会批量取该日期起 {@link #PREFETCH_DAYS} 天，因此阻塞调用线程，
+     * 仅供手动触发的测试使用，不可放进每 tick 的路径。
      */
     public static void queryNow(LocalDate date) {
-        queryHoliday(date);
+        fetchRangeFrom(date);
     }
 
-    /** 是否仍有日期正在后台请求中，用于推迟依赖跨天预测的提示。 */
+    /** 是否仍有请求正在进行中，用于推迟依赖跨天预测的提示。 */
     public static boolean isPrefetching() {
-        return bulkPrefetching || !prefetching.isEmpty();
+        return bulkPrefetching;
     }
 }
