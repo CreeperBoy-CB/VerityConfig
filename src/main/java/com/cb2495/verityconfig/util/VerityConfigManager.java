@@ -99,8 +99,10 @@ public class VerityConfigManager {
         // 如果 API Key 为空，强制默认
         if (data.apiKey.isEmpty()) {
             data.think = false;
-            data.ttsProvider = "LOCAL";
-            data.useTTS = PlatformUtils.isWindows(); // 只有 Windows 才开启语音
+            // 语音默认开启。电脑用 Verity 本地模型（英文），
+            // 手机在 FCL 下只有 NATIVE 能出声，所以默认用系统原生 TTS（中文）
+            data.ttsProvider = PlatformUtils.isWindows() ? "LOCAL" : "NATIVE";
+            data.useTTS = true;
         }
         return data;
     }

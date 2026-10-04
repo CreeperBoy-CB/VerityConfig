@@ -1,7 +1,6 @@
 package com.cb2495.verityconfig;
 
 import com.cb2495.verityconfig.util.ModConfig;
-import com.cb2495.verityconfig.util.PlatformUtils;
 import com.cb2495.verityconfig.util.VerityConfigManager;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.ChatFormatting;
@@ -79,7 +78,8 @@ public class VerityConfigScreen extends Screen {
     private EditBox apiKeyField, endpointField, customModelField;
     private Button apiKeyActionButton;
     private Checkbox thinkCheckbox;
-    private CycleButton<String> ttsProviderButton;
+    private Checkbox ttsCheckbox;
+    private DropdownWidget<String> ttsProviderDropdown;
     private DropdownWidget<String> providerDropdown;
     private DropdownWidget<ModelOption> modelDropdown;
 
@@ -200,25 +200,26 @@ public class VerityConfigScreen extends Screen {
                 Component.literal("深度思考"), loadedConfig.think, this::saveConfig);
         this.addRenderableWidget(this.thinkCheckbox);
 
-        // 7. 语音模型（仅 Windows）
-        if (PlatformUtils.isWindows()) {
-            this.ttsProviderButton = CycleButton.<String>builder(value -> Component.literal(
-                            switch (value) {
-                                case "NATIVE" -> "系统原生 (中文)";
-                                case "LOCAL" -> "原版声音 (英文)";
-                                default -> "关闭";
-                            }
-                    )).withValues(Arrays.asList("NATIVE", "LOCAL", "NONE"))
-                    .withInitialValue(loadedConfig.useTTS
-                            ? (loadedConfig.ttsProvider.equals("NATIVE") ? "NATIVE" : "LOCAL")
-                            : "NONE")
-                    .create(w / 2 - 100, startY + 150, 200, 20, Component.literal("语音模型"),
-                            (button, value) -> saveConfig());
-            this.addRenderableWidget(this.ttsProviderButton);
-        }
+        // 7. 语音朗读：勾选框 + 语音模型下拉框
+        this.ttsCheckbox = new AutoSaveCheckbox(
+                w / 2 - 100, startY + 150, 20, 20,
+                Component.literal("语音朗读"), loadedConfig.useTTS, this::saveConfig);
+        this.addRenderableWidget(this.ttsCheckbox);
 
-        // 8. 完成按钮（关键修改）
-        int saveButtonY = PlatformUtils.isWindows() ? startY + 180 : startY + 150;
+        // 下拉框紧接勾选框文字之后：勾选框 x + 24（Checkbox 的标签偏移）+ 标签宽度 + 间距
+        int ttsLabelRight = w / 2 - 100 + 24 + this.font.width(Component.literal("语音朗读")) + 6;
+        int ttsDropdownWidth = (w / 2 + 100) - ttsLabelRight; // 右边缘与「深度思考」行对齐
+        this.ttsProviderDropdown = new DropdownWidget<>(
+                ttsLabelRight, startY + 150, ttsDropdownWidth, 20,
+                Component.literal("语音模型"),
+                Arrays.asList("LOCAL", "NATIVE"),
+                loadedConfig.ttsProvider.equals("NATIVE") ? "NATIVE" : "LOCAL",
+                this::ttsProviderLabel,
+                value -> saveConfig());
+        this.addRenderableWidget(this.ttsProviderDropdown);
+
+        // 8. 完成按钮（语音行两端都显示，位置固定）
+        int saveButtonY = startY + 180;
         this.addRenderableWidget(Button.builder(Component.literal("完成"), btn -> {
             saveConfig();
             if (ModsListScreen.firstTimeSetup) {
@@ -369,6 +370,13 @@ public class VerityConfigScreen extends Screen {
         }
     }
 
+    /** 语音模型下拉框的显示文案。 */
+    private Component ttsProviderLabel(String value) {
+        return Component.literal("NATIVE".equals(value)
+                ? "手机/电脑原生 (中文)"
+                : "Verity™ (英文)");
+    }
+
     private void updateApiKeyActionButton() {
         if (apiKeyActionButton == null || apiKeyField == null) return;
         if (apiKeyField.getValue().isEmpty()) {
@@ -392,17 +400,18 @@ public class VerityConfigScreen extends Screen {
         data.useTTS = false;
         data.ttsProvider = "LOCAL";
 
-        if (PlatformUtils.isWindows()) {
-            // 控件可能尚未创建（端点输入框在初始化期间就会触发一次保存），此时沿用已加载的配置
-            String selectedTts = ttsProviderButton != null
-                    ? ttsProviderButton.getValue()
-                    : (loadedConfig != null && loadedConfig.useTTS ? loadedConfig.ttsProvider : "NONE");
-            // Verity 只接受 NATIVE/LOCAL/GROQ/KOKORO/CARTESIA，NONE 与任何未知值都必须落回 LOCAL，
+        // 控件可能尚未创建（端点输入框在初始化期间就会触发一次保存），此时沿用已加载的配置
+        if (ttsCheckbox != null) {
+            // Verity 只接受 NATIVE/LOCAL/GROQ/KOKORO/CARTESIA，未知值必须落回 LOCAL，
             // 否则会写出无法解析的配置项
-            if ("NATIVE".equals(selectedTts) || "LOCAL".equals(selectedTts)) {
-                data.useTTS = true;
-                data.ttsProvider = selectedTts;
-            }
+            data.useTTS = ttsCheckbox.selected();
+            String selectedTts = ttsProviderDropdown != null
+                    ? ttsProviderDropdown.getSelected()
+                    : null;
+            data.ttsProvider = "NATIVE".equals(selectedTts) ? "NATIVE" : "LOCAL";
+        } else if (loadedConfig != null && loadedConfig.useTTS) {
+            data.useTTS = true;
+            data.ttsProvider = "NATIVE".equals(loadedConfig.ttsProvider) ? "NATIVE" : "LOCAL";
         }
 
         VerityConfigManager.saveVerityConfig(data);
