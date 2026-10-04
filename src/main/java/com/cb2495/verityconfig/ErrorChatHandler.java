@@ -16,6 +16,7 @@ import net.minecraftforge.fml.common.Mod;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
 public class ErrorChatHandler {
@@ -103,17 +104,42 @@ public class ErrorChatHandler {
     /**
      * 判断是否为记忆文件损坏导致的请求结构错误。
      * <p>
-     * 典型报错：
-     * An assistant message with 'tool_calls' must be followed by tool messages
-     * responding to each 'tool_call_id'.
+     * 已经见过的两种说法（同一类问题的不同措辞）：
+     * <ul>
+     *   <li>An assistant message with 'tool_calls' must be followed by
+     *       tool messages responding to each 'tool_call_id'.</li>
+     *   <li>Invalid assistant message: content or tool_calls must be set</li>
+     * </ul>
+     * 两者都是「历史里存在一条既没有 content 也没有 tool_calls 的
+     * assistant 消息」，也就是记忆文件坏掉。
      * <p>
-     * 这类报错的 code 固定为 invalid_request_error，但同一个 code 也用于其他
-     * 请求参数错误，因此必须靠 message 内容区分，否则会把无关错误误判成记忆损坏。
+     * 这类报错的 code 固定为 invalid_request_error，但同一个 code 也用于
+     * 其他请求参数错误，因此必须靠 message 内容区分，否则会把无关错误
+     * 误判成记忆损坏。判断条件写得宽一些：只要消息提到 assistant 且
+     * 提到 content 或 tool_calls 缺失，就认为是这一类，避免对方再改
+     * 措辞时又漏判。
      */
     private static boolean isMemoryBrokenError(String message) {
         if (message == null || message.isEmpty()) return false;
-        return message.contains("tool_calls")
-                && message.contains("must be followed by tool messages");
+
+        // 全部转小写再比：对方改措辞时大小写也可能跟着变，不做这一步
+        // 一旦写成 Invalid Assistant Message 就会漏判
+        String lower = message.toLowerCase(Locale.ROOT);
+
+        // 说法一：tool_calls 后面没跟对应的 tool 消息
+        if (lower.contains("tool_calls")
+                && lower.contains("must be followed by tool messages")) {
+            return true;
+        }
+
+        // 说法二：assistant 消息的 content 与 tool_calls 都没设置
+        if (lower.contains("assistant")
+                && lower.contains("must be set")
+                && (lower.contains("content") || lower.contains("tool_calls"))) {
+            return true;
+        }
+
+        return false;
     }
 
     // ---------- 提供商处理 ----------

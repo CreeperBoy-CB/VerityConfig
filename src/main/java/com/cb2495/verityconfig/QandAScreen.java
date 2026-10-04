@@ -19,6 +19,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@SuppressWarnings("removal")
 public class QandAScreen extends Screen {
 
     private static final Pattern QUESTION_PATTERN = Pattern.compile("^Q:\\s*(.*)$");
