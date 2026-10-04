@@ -24,6 +24,11 @@ public class DropdownWidget<T> extends AbstractWidget {
     private static final int SCROLLBAR_WIDTH = 4;      // 滚动条宽度
 
     private boolean draggingScrollbar = false;
+    /**
+     * 展开列表的宽度。默认与按钮同宽；设为更大值时，按钮保持窄宽度，
+     * 但展开的列表按此宽度绘制，避免长选项文字被截断。
+     */
+    private int expandedWidth = -1;
 
     public DropdownWidget(int x, int y, int width, int height,
                           Component message, List<T> options, T initialValue,
@@ -33,6 +38,16 @@ public class DropdownWidget<T> extends AbstractWidget {
         this.displayText = displayText;
         this.onSelect = onSelect;
         this.selected = initialValue;
+    }
+
+    /** 设置展开列表的宽度（按钮宽度不变）。传 0 或负数表示恢复为与按钮同宽。 */
+    public void setExpandedWidth(int expandedWidth) {
+        this.expandedWidth = expandedWidth;
+    }
+
+    /** 展开列表实际使用的宽度。 */
+    private int listWidth() {
+        return expandedWidth > 0 ? expandedWidth : width;
     }
 
     private static DropdownWidget<?> currentlyOpen = null;
@@ -63,14 +78,15 @@ public class DropdownWidget<T> extends AbstractWidget {
             graphics.pose().translate(0, 0, 100); // 提高层级，避免被其他控件遮挡
 
             int listY = getY() + height + 1;
+            int lw = listWidth(); // 列表可比按钮宽，避免长选项被截断
             int visibleCount = Math.min(MAX_VISIBLE, options.size());
             int totalHeight = visibleCount * ITEM_HEIGHT + 4;
 
             // 列表背景：半透明黑色
-            graphics.fill(getX(), listY, getX() + width, listY + totalHeight, 0xCC000000);
+            graphics.fill(getX(), listY, getX() + lw, listY + totalHeight, 0xCC000000);
 
             // 先绘制滚动条轨道（右侧）
-            int trackX = getX() + width - SCROLLBAR_WIDTH;
+            int trackX = getX() + lw - SCROLLBAR_WIDTH;
             graphics.fill(trackX, listY + 1, trackX + SCROLLBAR_WIDTH, listY + totalHeight - 1, 0xFF333333);
 
             int maxScroll = Math.max(0, options.size() - MAX_VISIBLE);
@@ -79,7 +95,7 @@ public class DropdownWidget<T> extends AbstractWidget {
             // 绘制所有可见选项
             for (int i = scrollOffset; i < Math.min(scrollOffset + MAX_VISIBLE, options.size()); i++) {
                 int optionY = listY + 2 + (i - scrollOffset) * ITEM_HEIGHT;
-                boolean isHovered = mouseX >= getX() && mouseX <= getX() + width &&
+                boolean isHovered = mouseX >= getX() && mouseX <= getX() + lw &&
                         mouseY >= optionY && mouseY <= optionY + 10;
 
                 // 选项背景（留出滚动条空间）
@@ -105,7 +121,7 @@ public class DropdownWidget<T> extends AbstractWidget {
             }
 
             // 最后绘制列表边框
-            graphics.renderOutline(getX(), listY, width, totalHeight, 0xFF555555);
+            graphics.renderOutline(getX(), listY, lw, totalHeight, 0xFF555555);
 
             graphics.pose().popPose();
         }
@@ -116,13 +132,15 @@ public class DropdownWidget<T> extends AbstractWidget {
         if (button == 0) {
             if (expanded) {
                 int listY = getY() + height + 1;
+                int lw = listWidth();
                 int visibleCount = Math.min(MAX_VISIBLE, options.size());
                 int totalHeight = visibleCount * ITEM_HEIGHT + 4;
 
                 // 判断鼠标是否在按钮或列表区域内（与 isMouseOver 一致）
+                // 注意按钮用 width，列表用 listWidth()，两者可能不同宽
                 boolean inButton = mouseX >= getX() && mouseX <= getX() + width
                         && mouseY >= getY() && mouseY <= getY() + height;
-                boolean inList = mouseX >= getX() && mouseX <= getX() + width
+                boolean inList = mouseX >= getX() && mouseX <= getX() + lw
                         && mouseY >= listY && mouseY <= listY + totalHeight;
 
                 // 如果点击在按钮或列表区域，都消费事件
@@ -136,7 +154,7 @@ public class DropdownWidget<T> extends AbstractWidget {
 
                 // 点击在列表区域
                 if (inList) {
-                    int trackX = getX() + width - SCROLLBAR_WIDTH;
+                    int trackX = getX() + lw - SCROLLBAR_WIDTH;
 
                     // 滚动条拖动
                     if (mouseX >= trackX && mouseX <= trackX + SCROLLBAR_WIDTH) {
@@ -146,7 +164,7 @@ public class DropdownWidget<T> extends AbstractWidget {
                     }
 
                     // 选项选择（避开滚动条区域）
-                    int optionAreaRight = getX() + width - SCROLLBAR_WIDTH;
+                    int optionAreaRight = getX() + lw - SCROLLBAR_WIDTH;
                     int relativeY = (int) mouseY - listY;
                     int index = scrollOffset + relativeY / ITEM_HEIGHT;
                     if (relativeY >= 0 && index >= 0 && index < options.size()
@@ -202,9 +220,10 @@ public class DropdownWidget<T> extends AbstractWidget {
     public boolean isMouseOver(double mouseX, double mouseY) {
         if (expanded) {
             int listY = getY() + height + 1;
+            int lw = listWidth();
             int visibleCount = Math.min(MAX_VISIBLE, options.size());
             int totalHeight = visibleCount * ITEM_HEIGHT + 4;
-            return mouseX >= getX() && mouseX <= getX() + width
+            return mouseX >= getX() && mouseX <= getX() + lw
                     && mouseY >= getY() && mouseY <= listY + totalHeight;
         }
         return super.isMouseOver(mouseX, mouseY);

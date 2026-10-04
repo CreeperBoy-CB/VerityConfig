@@ -94,9 +94,24 @@ public class VerityConfigScreen extends Screen {
     private static final int ROW_API_KEY = 30;
     private static final int ROW_ENDPOINT = 60;
     private static final int ROW_MODEL = 90;
-    private static final int ROW_THINK = 120;
-    private static final int ROW_TTS = 150;
+    /** 语音朗读行（在深度思考之上）。 */
+    private static final int ROW_TTS = 120;
+    /** 深度思考行。 */
+    private static final int ROW_THINK = 150;
     private static final int ROW_DONE = 180;
+    /** 模型选「自定义」时，下拉框收缩到的宽度；余下空间给输入框。 */
+    private static final int MODEL_DROPDOWN_NARROW_WIDTH = 56;
+    /** 模型下拉框完整宽度（展开列表也用这个宽度，避免长选项被截断）。 */
+    private static final int MODEL_DROPDOWN_WIDTH = 204;
+    /**
+     * 自定义模型输入框相对模型行的微调：下移、左移、以及宽度的收窄量。
+     * <p>
+     * 宽度 = 行右边缘 - {@link #modelFieldX}，而左边缘已含 {@link #MODEL_FIELD_X_NUDGE}，
+     * 左移 1px 会让宽度自然 +1。要得到净 -1 的宽度变化，这里必须多减 1。
+     */
+    private static final int MODEL_FIELD_Y_NUDGE = 1;
+    private static final int MODEL_FIELD_X_NUDGE = -1;
+    private static final int MODEL_FIELD_WIDTH_NUDGE = -2;
     /**
      * 语音下拉框左边缘相对窗口中心（w/2）的偏移。
      * 不用 font.width("语音朗读") 计算，避免随字体文件漂移。
@@ -142,7 +157,7 @@ public class VerityConfigScreen extends Screen {
 
         // 1. 提供商下拉框 + 获取Key按钮
         this.providerDropdown = new DropdownWidget<>(
-                w / 2 - 101, startY, 156, 20,
+                w / 2 - 101, startY, 156, 22,
                 Component.literal("提供商"),
                 new ArrayList<>(PROVIDER_MODELS.keySet()),
                 selectedProvider,
@@ -179,7 +194,7 @@ public class VerityConfigScreen extends Screen {
                             Component.literal("该提供商暂无预设链接，请自行获取"), false);
                 }
             }
-        }).pos(w / 2 + 55, startY).size(48, 20).build());
+        }).pos(w / 2 + 55, startY).size(48, 22).build());
 
         // 2. API Key 输入框
         this.apiKeyField = new EditBox(this.font, w / 2 - 100, startY + ROW_API_KEY, 180, 20, Component.literal("API Key"));
@@ -203,7 +218,7 @@ public class VerityConfigScreen extends Screen {
         updateApiKeyActionButton();
 
         // 3. Base URL
-        this.endpointField = new EditBox(this.font, w / 2 - 100, startY + ROW_ENDPOINT, 202, 20, Component.literal("Base URL"));
+        this.endpointField = new EditBox(this.font, w / 2 - 100, startY + ROW_ENDPOINT, 202, 22, Component.literal("Base URL"));
         this.endpointField.setMaxLength(128);
         this.endpointField.setValue(loadedConfig.endpoint.isEmpty()
                 ? VerityConfigManager.getEndpointForProvider(selectedProvider)
@@ -213,8 +228,10 @@ public class VerityConfigScreen extends Screen {
         this.addRenderableWidget(this.endpointField);
         this.endpointField.setResponder(s -> saveConfig());
 
-        // 4. 自定义模型输入框（先创建）
-        this.customModelField = new EditBox(this.font, w / 2 + 1, startY + ROW_THINK, 101, 20, Component.literal("自定义模型"));
+        // 4. 自定义模型输入框（先创建；初始宽度按「下拉框已收缩」布局，由 rebuildModelWidgets 校正）
+        this.customModelField = new EditBox(this.font, modelFieldX(w),
+                startY + ROW_MODEL + MODEL_FIELD_Y_NUDGE,
+                modelFieldWidth(w), 20, Component.literal("自定义模型"));
         this.customModelField.setMaxLength(128);
         this.customModelField.setHint(Component.literal("自定义模型名称")
                 .withStyle(ChatFormatting.GRAY).withStyle(ChatFormatting.ITALIC));
@@ -224,16 +241,10 @@ public class VerityConfigScreen extends Screen {
         // 5. 模型下拉框
         rebuildModelWidgets();
 
-        // 6. 深度思考复选框
-        this.thinkCheckbox = new AutoSaveCheckbox(
-                w / 2 - 101, startY + ROW_THINK, 20, 20,
-                Component.literal("深度思考"), loadedConfig.think, this::saveConfig);
-        this.addRenderableWidget(this.thinkCheckbox);
-
-        // 7. 语音朗读：勾选框 + 语音模型下拉框
+        // 6. 语音朗读：勾选框 + 语音模型下拉框
         this.ttsCheckbox = new AutoSaveCheckbox(
                 w / 2 - 101, startY + ROW_TTS, 20, 20,
-                Component.literal("语音朗读"), loadedConfig.useTTS, this::saveConfig);
+                Component.literal("语音朗读"), loadedConfig.useTTS, this::onTtsToggled);
         this.addRenderableWidget(this.ttsCheckbox);
 
         // 语音下拉框：左边缘用固定偏移，不用 font.width() —— 字体宽度由字体文件决定，
@@ -248,6 +259,14 @@ public class VerityConfigScreen extends Screen {
                 this::ttsProviderLabel,
                 value -> saveConfig());
         this.addRenderableWidget(this.ttsProviderDropdown);
+        // 关闭语音时隐藏下拉框
+        this.ttsProviderDropdown.visible = loadedConfig.useTTS;
+
+        // 7. 深度思考复选框
+        this.thinkCheckbox = new AutoSaveCheckbox(
+                w / 2 - 101, startY + ROW_THINK, 20, 20,
+                Component.literal("深度思考"), loadedConfig.think, this::saveConfig);
+        this.addRenderableWidget(this.thinkCheckbox);
 
         // 8. 完成按钮（语音行两端都显示，位置固定）
         int saveButtonY = startY + ROW_DONE;
@@ -375,30 +394,84 @@ public class VerityConfigScreen extends Screen {
                 .orElse(modelOptions.get(0));
 
         this.modelDropdown = new DropdownWidget<>(
-                w / 2 - 101, modelY, 204, 20,
+                w / 2 - 101, modelY, modelDropdownWidth(initialOption.name), 22,
                 Component.literal("模型"),
                 modelOptions,
                 initialOption,
                 option -> Component.literal(option.desc.isEmpty() ? option.name : option.name + " (" + option.desc + ")"),
                 option -> {
-                    if ("自定义".equals(option.name)) {
-                        if (customModelField != null) customModelField.setVisible(true);
-                    } else {
-                        if (customModelField != null) customModelField.setVisible(false);
-                    }
+                    applyModelLayout(w, option.name);
                     saveConfig();
                 }
         );
+        // 展开列表始终用完整宽度，这样选「自定义」后弹出时长选项仍是原宽度
+        this.modelDropdown.setExpandedWidth(MODEL_DROPDOWN_WIDTH);
         this.addRenderableWidget(this.modelDropdown);
 
+        applyModelLayout(w, initialOption.name);
         if (customModelField != null) {
-            customModelField.setVisible("自定义".equals(initialOption.name));
             if ("自定义".equals(initialOption.name) && !loadedConfig.model.isEmpty()) {
                 customModelField.setValue(loadedConfig.model);
             } else {
                 customModelField.setValue("");
             }
         }
+    }
+
+    /** 判断某个模型名是否代表下拉框里的「自定义」项。 */
+    private boolean isCustomModel(String modelName) {
+        return "自定义".equals(modelName);
+    }
+
+    /** 模型下拉框当前应显示的宽度：选「自定义」时收缩，把空间让给输入框。 */
+    private int modelDropdownWidth(String modelName) {
+        return isCustomModel(modelName) ? MODEL_DROPDOWN_NARROW_WIDTH : MODEL_DROPDOWN_WIDTH;
+    }
+
+    /** 输入框左边缘：紧跟收缩后的下拉框（含微调）。 */
+    private int modelFieldX(int w) {
+        return w / 2 - 101 + MODEL_DROPDOWN_NARROW_WIDTH + 1 + MODEL_FIELD_X_NUDGE;
+    }
+
+    /** 输入框宽度：从收缩后的下拉框右侧延伸到该行右边缘（含微调）。 */
+    private int modelFieldWidth(int w) {
+        return (w / 2 - 100 + MODEL_DROPDOWN_WIDTH) - modelFieldX(w) + MODEL_FIELD_WIDTH_NUDGE;
+    }
+
+    /**
+     * 按当前选中项摆放「模型」这一行：
+     * 选「自定义」时下拉框收缩到 {@link #MODEL_DROPDOWN_NARROW_WIDTH}，
+     * 输入框占据剩余空间；否则下拉框占满整行、输入框隐藏。
+     * <p>
+     * 下拉框只是按钮变窄，展开列表由 {@link DropdownWidget#setExpandedWidth} 保持完整宽度，
+     * 因此选「自定义」后弹出的长选项仍然完整显示。
+     */
+    private void applyModelLayout(int w, String modelName) {
+        boolean custom = isCustomModel(modelName);
+        if (modelDropdown != null) {
+            modelDropdown.setWidth(modelDropdownWidth(modelName));
+        }
+        if (customModelField != null) {
+            customModelField.setX(modelFieldX(w));
+            customModelField.setWidth(modelFieldWidth(w));
+            customModelField.setVisible(custom);
+        }
+    }
+
+    /**
+     * 语音朗读勾选框切换时调用：关闭语音就隐藏右侧的语音模型下拉框，
+     * 开启则重新显示。最后照常保存配置。
+     */
+    private void onTtsToggled() {
+        if (ttsProviderDropdown != null) {
+            boolean on = ttsCheckbox != null && ttsCheckbox.selected();
+            ttsProviderDropdown.visible = on;
+            if (!on) {
+                // 收起已展开的列表，否则隐藏后列表可能仍残留
+                ttsProviderDropdown.collapse();
+            }
+        }
+        saveConfig();
     }
 
     /** 语音模型下拉框的显示文案。 */
