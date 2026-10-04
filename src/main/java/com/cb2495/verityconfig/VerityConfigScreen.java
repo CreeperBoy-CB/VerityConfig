@@ -15,6 +15,7 @@ import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 
 import java.io.InputStream;
 import java.util.*;
@@ -74,6 +75,35 @@ public class VerityConfigScreen extends Screen {
         KEY_URLS.put("自定义", "");
     }
 
+    // ---------- 布局常量 ----------
+    /** 控件区首行 Y 的下限（屏幕很矮时）。 */
+    private static final int MIN_START_Y = 30;
+    /** 控件区首行 Y 的上限（屏幕很高时）。 */
+    private static final int MAX_START_Y = 48;
+    /** 首行 Y 达到下限 MIN_START_Y 的窗口高度。 */
+    private static final int START_Y_RAMP_FROM = 262;
+    /** 首行 Y 达到上限 MAX_START_Y 的窗口高度。 */
+    private static final int START_Y_RAMP_TO = 540;
+    /** 底部留白至少要占屏幕高的这个分母之一（即 ≥ 屏幕高 / 9，向下取整）。 */
+    private static final int BOTTOM_MARGIN_DIVISOR = 9;
+    /** 底部留白约束无法满足时，首行改用这个固定值。 */
+    private static final int FALLBACK_START_Y = 32;
+    /** 控件区总高（首行顶部 → 完成按钮底部）。 */
+    private static final int CONTENT_HEIGHT = 200;
+    /** 各行相对首行的偏移，行高统一 20（提供商行偏移为 0，直接用首行 Y）。 */
+    private static final int ROW_API_KEY = 30;
+    private static final int ROW_ENDPOINT = 60;
+    private static final int ROW_MODEL = 90;
+    private static final int ROW_THINK = 120;
+    private static final int ROW_TTS = 150;
+    private static final int ROW_DONE = 180;
+    /**
+     * 语音下拉框左边缘相对窗口中心（w/2）的偏移。
+     * 不用 font.width("语音朗读") 计算，避免随字体文件漂移。
+     * -30 时与勾选框文字「语音朗读」右侧留约 2px 间隙；数值每 +1 即右移 1px。
+     */
+    private static final int TTS_DROPDOWN_OFFSET = -30;
+
     // ---------- 控件 ----------
     private EditBox apiKeyField, endpointField, customModelField;
     private Button apiKeyActionButton;
@@ -100,8 +130,8 @@ public class VerityConfigScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        int w = this.width, h = this.height;
-        int startY = h / 2 - 70;
+        int w = this.width;
+        int startY = contentStartY();
 
         loadSponsorTexture();
         // 由配置决定是否显示：ShowSponsor 为 false 时永不展开，即使空间足够
@@ -152,7 +182,7 @@ public class VerityConfigScreen extends Screen {
         }).pos(w / 2 + 55, startY).size(48, 20).build());
 
         // 2. API Key 输入框
-        this.apiKeyField = new EditBox(this.font, w / 2 - 100, startY + 30, 180, 20, Component.literal("API Key"));
+        this.apiKeyField = new EditBox(this.font, w / 2 - 100, startY + ROW_API_KEY, 180, 20, Component.literal("API Key"));
         this.apiKeyField.setMaxLength(512);
         this.apiKeyField.setValue(loadedConfig.apiKey);
         this.apiKeyField.setHint(Component.literal("请输入 API Key")
@@ -173,7 +203,7 @@ public class VerityConfigScreen extends Screen {
         updateApiKeyActionButton();
 
         // 3. Base URL
-        this.endpointField = new EditBox(this.font, w / 2 - 100, startY + 60, 201, 20, Component.literal("Base URL"));
+        this.endpointField = new EditBox(this.font, w / 2 - 100, startY + ROW_ENDPOINT, 202, 20, Component.literal("Base URL"));
         this.endpointField.setMaxLength(128);
         this.endpointField.setValue(loadedConfig.endpoint.isEmpty()
                 ? VerityConfigManager.getEndpointForProvider(selectedProvider)
@@ -184,7 +214,7 @@ public class VerityConfigScreen extends Screen {
         this.endpointField.setResponder(s -> saveConfig());
 
         // 4. 自定义模型输入框（先创建）
-        this.customModelField = new EditBox(this.font, w / 2 + 1, startY + 120, 100, 20, Component.literal("自定义模型"));
+        this.customModelField = new EditBox(this.font, w / 2 + 1, startY + ROW_THINK, 101, 20, Component.literal("自定义模型"));
         this.customModelField.setMaxLength(128);
         this.customModelField.setHint(Component.literal("自定义模型名称")
                 .withStyle(ChatFormatting.GRAY).withStyle(ChatFormatting.ITALIC));
@@ -196,21 +226,22 @@ public class VerityConfigScreen extends Screen {
 
         // 6. 深度思考复选框
         this.thinkCheckbox = new AutoSaveCheckbox(
-                w / 2 - 100, startY + 120, 20, 20,
+                w / 2 - 101, startY + ROW_THINK, 20, 20,
                 Component.literal("深度思考"), loadedConfig.think, this::saveConfig);
         this.addRenderableWidget(this.thinkCheckbox);
 
         // 7. 语音朗读：勾选框 + 语音模型下拉框
         this.ttsCheckbox = new AutoSaveCheckbox(
-                w / 2 - 100, startY + 150, 20, 20,
+                w / 2 - 101, startY + ROW_TTS, 20, 20,
                 Component.literal("语音朗读"), loadedConfig.useTTS, this::saveConfig);
         this.addRenderableWidget(this.ttsCheckbox);
 
-        // 下拉框紧接勾选框文字之后：勾选框 x + 24（Checkbox 的标签偏移）+ 标签宽度 + 间距
-        int ttsLabelRight = w / 2 - 100 + 24 + this.font.width(Component.literal("语音朗读")) + 6;
-        int ttsDropdownWidth = (w / 2 + 100) - ttsLabelRight; // 右边缘与「深度思考」行对齐
+        // 语音下拉框：左边缘用固定偏移，不用 font.width() —— 字体宽度由字体文件决定，
+        // 靠它算位置会随字体/语言环境漂移，永远对不齐，这里直接给死值便于微调。
+        int ttsDropdownX = w / 2 + TTS_DROPDOWN_OFFSET;
+        int ttsDropdownWidth = (w / 2 + 103) - ttsDropdownX; // 右边缘与「深度思考」行对齐
         this.ttsProviderDropdown = new DropdownWidget<>(
-                ttsLabelRight, startY + 150, ttsDropdownWidth, 20,
+                ttsDropdownX, startY + ROW_TTS, ttsDropdownWidth, 20,
                 Component.literal("语音模型"),
                 Arrays.asList("LOCAL", "NATIVE"),
                 loadedConfig.ttsProvider.equals("NATIVE") ? "NATIVE" : "LOCAL",
@@ -219,7 +250,7 @@ public class VerityConfigScreen extends Screen {
         this.addRenderableWidget(this.ttsProviderDropdown);
 
         // 8. 完成按钮（语音行两端都显示，位置固定）
-        int saveButtonY = startY + 180;
+        int saveButtonY = startY + ROW_DONE;
         this.addRenderableWidget(Button.builder(Component.literal("完成"), btn -> {
             saveConfig();
             if (ModsListScreen.firstTimeSetup) {
@@ -327,9 +358,9 @@ public class VerityConfigScreen extends Screen {
 
     private void rebuildModelWidgets() {
         if (modelDropdown != null) removeWidget(modelDropdown);
-        int w = this.width, h = this.height;
-        int startY = h / 2 - 70;
-        int modelY = startY + 90;
+        int w = this.width;
+        int startY = contentStartY();
+        int modelY = startY + ROW_MODEL;
 
         List<ModelOption> modelOptions = new ArrayList<>(PROVIDER_MODELS.getOrDefault(selectedProvider, Collections.emptyList()));
         modelOptions.add(new ModelOption("自定义", ""));
@@ -344,7 +375,7 @@ public class VerityConfigScreen extends Screen {
                 .orElse(modelOptions.get(0));
 
         this.modelDropdown = new DropdownWidget<>(
-                w / 2 - 100, modelY, 202, 20,
+                w / 2 - 101, modelY, 204, 20,
                 Component.literal("模型"),
                 modelOptions,
                 initialOption,
@@ -375,6 +406,32 @@ public class VerityConfigScreen extends Screen {
         return Component.literal("NATIVE".equals(value)
                 ? "手机/电脑原生 (中文)"
                 : "Verity™ (英文)");
+    }
+
+    /**
+     * 控件区首行的 Y 坐标。
+     * <p>
+     * 先按窗口高度在 {@link #MIN_START_Y}~{@link #MAX_START_Y} 之间线性取值
+     * （窗口越矮越靠上，越高越靠下），再叠加一条上限：底部留白必须
+     * ≥ 屏幕高度的 1/{@link #BOTTOM_MARGIN_DIVISOR}（向下取整），
+     * 即 {@code startY ≤ 屏幕高 - 留白 - CONTENT_HEIGHT}。
+     * <p>
+     * 窗口太矮导致该上限连 {@link #MIN_START_Y} 都容纳不下时，约束无法成立，
+     * 此时直接取 {@link #FALLBACK_START_Y}，不再尝试满足留白。
+     */
+    private int contentStartY() {
+        // inverseLerp 不夹取，窗口高度超出区间时会得到 <0 或 >1，必须自己 clamp
+        float t = Mth.clamp(
+                Mth.inverseLerp(this.height, START_Y_RAMP_FROM, START_Y_RAMP_TO), 0.0F, 1.0F);
+        int startY = Mth.lerpInt(t, MIN_START_Y, MAX_START_Y);
+
+        int bottomMargin = this.height / BOTTOM_MARGIN_DIVISOR;
+        int maxAllowed = this.height - bottomMargin - CONTENT_HEIGHT;
+        if (maxAllowed < MIN_START_Y) {
+            // 留白下限与首行下限无法同时满足，放弃留白，取固定兜底值
+            return FALLBACK_START_Y;
+        }
+        return Math.min(startY, maxAllowed);
     }
 
     private void updateApiKeyActionButton() {
@@ -422,7 +479,8 @@ public class VerityConfigScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(graphics);
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 15, 0xFFFFFF);
+        // 标题固定在控件区上方（首行 y=20，标题占 9px，中间留 5px）
+        graphics.drawCenteredString(this.font, this.title, this.width / 2, 6, 0xFFFFFF);
 
         // 绘制赞助图片
         if (sponsorTextureLoaded && sponsorTexture != null && sponsorExpanded) {
