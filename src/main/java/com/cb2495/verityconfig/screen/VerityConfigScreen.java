@@ -6,6 +6,7 @@ import com.cb2495.verityconfig.config.Providers;
 import com.cb2495.verityconfig.config.VerityConfigManager;
 import com.cb2495.verityconfig.util.DebouncedTask;
 import com.cb2495.verityconfig.util.Log;
+import com.cb2495.verityconfig.util.PlatformUtils;
 import com.cb2495.verityconfig.widget.AutoSaveCheckbox;
 import com.cb2495.verityconfig.widget.DropdownWidget;
 import com.mojang.blaze3d.platform.NativeImage;
@@ -74,6 +75,10 @@ public class VerityConfigScreen extends Screen {
      * -30 时与勾选框文字「语音朗读」右侧留约 2px 间隙；数值每 +1 即右移 1px。
      */
     private static final int TTS_DROPDOWN_OFFSET = -30;
+
+    // ---------- 平台限制（手机端选 Verity™） ----------
+    /** 手机端不可选中的语音模型值。 */
+    private static final String TTS_VALUE_LOCAL = "LOCAL";
 
     // ---------- 控件 ----------
     private EditBox apiKeyField, endpointField, customModelField;
@@ -230,6 +235,9 @@ public class VerityConfigScreen extends Screen {
                 this::ttsProviderLabel,
                 value -> saveConfig());
         this.addRenderableWidget(this.ttsProviderDropdown);
+        // 手机端把 Verity™ 灰显并拦截点击：点了不会改配置，而是变红 + 抖动 + 提示
+        this.ttsProviderDropdown.setOptionDisabled(VerityConfigScreen::isTtsValueDisabled);
+        this.ttsProviderDropdown.setOnDisabledClick(value -> showTtsPlatformReject());
         // 关闭语音时隐藏下拉框
         this.ttsProviderDropdown.visible = loadedConfig.useTTS;
 
@@ -467,6 +475,39 @@ public class VerityConfigScreen extends Screen {
     }
 
     /**
+     * 当前平台是否允许选择 Verity™ 语音模型。
+     * <p>Verity™ 是电脑端专用通道，手机端（安卓，os.name 报 Linux）选它不会生效，
+     * 因此在手机端把它灰显并拦截点击，避免用户改完配置却发现没作用。
+     */
+    private static boolean canUseVerityTts() {
+        return PlatformUtils.isWindows();
+    }
+
+    /**
+     * 判定给定的语音模型值在当前平台是否被禁用。
+     * <p>{@code NATIVE}（原生）两个平台都可用，只有 {@code LOCAL}（Verity™）受限。
+     */
+    private static boolean isTtsValueDisabled(String value) {
+        return TTS_VALUE_LOCAL.equals(value) && !canUseVerityTts();
+    }
+
+    /**
+     * 手机端点选 Verity™ 时的反馈：交给下拉框自己在按钮内弹出警告
+     * （边框变红、文字换成提示并抖动），这里只负责提供文案。
+     * <p>重复点击由下拉框的忽略窗口统一挡掉，不会让抖动与淡出重新开始。
+     */
+    private void showTtsPlatformReject() {
+        if (ttsProviderDropdown != null) {
+            ttsProviderDropdown.showWarning(ttsRejectHint());
+        }
+    }
+
+    /** 平台不支持时显示在下拉框内的说明文字。 */
+    private static Component ttsRejectHint() {
+        return Component.literal("安卓设备暂不支持");
+    }
+
+    /**
      * 控件区首行的 Y 坐标。
      * <p>
      * 先按窗口高度在 {@link #MIN_START_Y}~{@link #MAX_START_Y} 之间线性取值
@@ -587,6 +628,7 @@ public class VerityConfigScreen extends Screen {
         // 注意：这里不刷新赞助按钮文案。
         // 文案只取决于 sponsorExpanded 与窗口宽度，两者变化时都有明确的回调
         // （点击时、init() 时），每帧重建一个 Component 纯属浪费。
+        // 语音行的警告也由下拉框自己在按钮内绘制，这里不再插手。
         super.render(graphics, mouseX, mouseY, partialTick);
     }
 
