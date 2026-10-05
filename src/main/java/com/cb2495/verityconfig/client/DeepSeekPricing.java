@@ -1,0 +1,561 @@
+package com.cb2495.verityconfig.client;
+
+import com.cb2495.verityconfig.util.Log;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+
+/**
+ * DeepSeek API 的峰谷计价时段判断。
+ * <p>
+ * 规则（北京时间）：
+ * <ul>
+ *   <li>高峰：周一至周五（不含中国法定节假日）9:00-12:00、14:00-18:00</li>
+ *   <li>空闲：其余全部时段，含周末与中国法定节假日全天</li>
+ *   <li>调休上班的周末仍按空闲时段计费</li>
+ * </ul>
+ * <p>
+ * 法定节假日通过第三方接口查询，失败时退回本地判断（仅区分周一至周五与周末），
+ * 此时无法识别法定节假日，可能把节假日的工作日误判为高峰。
+ */
+public final class DeepSeekPricing {
+
+    private DeepSeekPricing() {}
+
+    /** 节假日查询接口域名。 */
+    private static final String HOLIDAY_HOST = "api.apisbo.com";
+    /** 批量查询路径，POST 请求体为 {"dates":["YYYY-MM-DD", ...]}。 */
+    private static final String BATCH_PATH = "/holidays/batch";
+    /** 每次请求取多少天；一次可覆盖春节等最长假期，且仍只发一次请求。 */
+    private static final int PREFETCH_DAYS = 30;
+
+    /**
+     * 是否输出调试日志。
+     * <p>默认<b>关闭</b>：打开时每次刷新都会打印完整响应正文与逐日期的判断过程，
+     * 量很大，不适合留在发布版本里。排查接口或日期问题时加
+     * {@code -Dverityconfig.debugHoliday=true} 即可打开，不必重新编译。
+     */
+    private static final boolean DEBUG_LOG = Boolean.getBoolean("verityconfig.debugHoliday");
+
+    /**
+     * 输出调试日志。
+     * <p>用 info 级别而不是 debug：开关本身已经由系统属性 {@link #DEBUG_LOG} 控制，
+     * 若再叠加一层日志级别过滤，打开属性却看不到输出会让人摸不着头脑。
+     */
+    private static void debug(String message) {
+        if (DEBUG_LOG) Log.info(message);
+    }
+
+    /** 供提示逻辑复用的调试输出，统一前缀便于过滤。 */
+    public static void debugHint(String message) {
+        debug("提示：" + message);
+    }
+
+    /** 连接超时（毫秒）。IPv6 不通时首个请求会在此时间后失败并转入 IPv4 重试。 */
+    private static final int CONNECT_TIMEOUT_MS = 5000;
+    /** 读取超时（毫秒）。 */
+    private static final int READ_TIMEOUT_MS = 5000;
+
+    /** 请求失败后的重试间隔（毫秒），避免接口临时不可用时一直拿不到数据。 */
+    private static final long RETRY_INTERVAL_MS = 30_000L;
+
+    /** 高峰上午段起点。 */
+    private static final LocalTime MORNING_START = LocalTime.of(9, 0);
+    /** 高峰上午段终点。 */
+    private static final LocalTime MORNING_END = LocalTime.of(12, 0);
+    /** 高峰下午段起点。 */
+    private static final LocalTime AFTERNOON_START = LocalTime.of(14, 0);
+    /** 高峰下午段终点。 */
+    private static final LocalTime AFTERNOON_END = LocalTime.of(18, 0);
+
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("M月d日 H:mm");
+
+    /** 已查询过的日期 -> 是否空闲日（法定节假日或周末）。 */
+    private static final Map<LocalDate, Boolean> holidayCache = new ConcurrentHashMap<>();
+    /** 当天已尝试过请求的标记，避免接口失败后每 tick 重复发起请求。 */
+    private static volatile LocalDate todayAttempted = null;
+    /** 上次发起请求的时刻，用于控制失败后的重试间隔。 */
+    private static volatile long lastAttemptAt = 0L;
+    /** 是否有批量请求正在进行中。 */
+    private static volatile boolean bulkPrefetching = false;
+    /** 常规连接失败、IPv4 重试成功后置位，后续请求直接走 IPv4。 */
+    private static volatile boolean preferIpv4 = false;
+
+    // ---------- 查询与缓存 ----------
+
+    /**
+     * 拉取当天起 {@link #PREFETCH_DAYS} 天的节假日数据并写入缓存。
+     * <p>接口支持批量查询，因此无论多少天都只发一次请求。
+     * <p>成功当天不再重复请求；失败则隔 {@link #RETRY_INTERVAL_MS} 后允许重试，
+     * 避免接口临时不可用时一直拿不到数据，也避免每 tick 都去请求。
+     */
+    public static void refreshIfNeeded() {
+        LocalDate today = LocalDate.now();
+        boolean alreadyTried = today.equals(todayAttempted);
+        boolean cooling = System.currentTimeMillis() - lastAttemptAt < RETRY_INTERVAL_MS;
+        debug("refreshIfNeeded：今天 " + today
+                + "，缓存已含今天=" + holidayCache.containsKey(today)
+                + "，今天已尝试过=" + alreadyTried
+                + "，距上次尝试 " + (System.currentTimeMillis() - lastAttemptAt) + "ms");
+        if (holidayCache.containsKey(today)) return;
+        if (alreadyTried && cooling) return;
+
+        todayAttempted = today;
+        lastAttemptAt = System.currentTimeMillis();
+        CompletableFuture.runAsync(() -> fetchRangeFrom(today));
+    }
+
+    /**
+     * 批量拉取 {@code start} 起若干天的数据并写入缓存。
+     * <p>网络请求应在后台线程调用；失败时静默退回（缓存不写入，
+     * 判断时按周末估算）。
+     *
+     * @param start 起始日期
+     */
+    private static void fetchRangeFrom(LocalDate start) {
+        if (bulkPrefetching) {
+            debug("已有请求进行中，跳过本次（起始 " + start + "）");
+            return;
+        }
+        bulkPrefetching = true;
+        long beganAt = System.currentTimeMillis();
+        try {
+            debug("开始请求：起始 " + start + "，共 " + PREFETCH_DAYS + " 天");
+            String body = fetchBatch(start, PREFETCH_DAYS);
+            debug("请求返回：耗时 " + (System.currentTimeMillis() - beganAt) + "ms，"
+                    + (body == null ? "正文为空" : "正文长度 " + body.length()));
+            if (body == null) {
+                debug("正文为空（非 200 或连接失败），本次不写入缓存");
+                return;
+            }
+            debug("响应正文：" + body);
+
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            if (!root.has("data") || !root.get("data").isJsonArray()) {
+                debug("响应缺少 data 数组，本次不写入缓存");
+                return;
+            }
+            int written = 0;
+            for (JsonElement element : root.getAsJsonArray("data")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject item = element.getAsJsonObject();
+                if (!item.has("date") || !item.has("isHoliday")) {
+                    debug("跳过缺少 date/isHoliday 的条目：" + item);
+                    continue;
+                }
+                LocalDate date;
+                try {
+                    date = LocalDate.parse(item.get("date").getAsString());
+                } catch (Exception e) {
+                    debug("跳过无法解析的日期：" + item.get("date"));
+                    continue;
+                }
+                boolean isHoliday = item.get("isHoliday").getAsBoolean();
+                // 调休上班的周末 isHoliday 为 false、isWorkday 为 true，
+                // 但规则要求调休周末仍按空闲时段计费，故必须叠加周末判断
+                boolean rest = isHoliday || isWeekend(date);
+                holidayCache.put(date, rest);
+                written++;
+                debug("  " + date + " (" + date.getDayOfWeek() + ") isHoliday=" + isHoliday
+                        + " " + date.getDayOfWeek() + "是否为周末=" + isWeekend(date)
+                        + " -> 空闲日=" + rest);
+            }
+            debug("写入缓存 " + written + " 天");
+        } catch (Exception e) {
+            debug("请求异常：" + e);
+            Log.warn("查询节假日失败，退回本地判断: " + e.getMessage());
+        } finally {
+            bulkPrefetching = false;
+            debug("本次请求结束，用时 " + (System.currentTimeMillis() - beganAt) + "ms，"
+                    + "缓存共 " + holidayCache.size() + " 天");
+        }
+    }
+
+    /**
+     * 发起批量查询请求，返回响应正文；失败返回 null。
+     * <p>先按常规方式连接；若失败（常见于本机 IPv6 不通而域名解析优先返回
+     * IPv6 地址，表现为 Connect/Read timed out），再改用 IPv4 地址重试。
+     * <p>一旦 IPv4 重试成功过，后续请求直接走 IPv4，避免每次都白等一次超时。
+     */
+    private static String fetchBatch(LocalDate start, int days) throws Exception {
+        JsonArray dates = new JsonArray();
+        for (int i = 0; i < days; i++) {
+            dates.add(start.plusDays(i).toString());
+        }
+        JsonObject payload = new JsonObject();
+        payload.add("dates", dates);
+        String json = payload.toString();
+
+        if (preferIpv4) {
+            debug("走 IPv4 直连（此前 IPv4 重试成功过）");
+            try {
+                return postViaIpv4(HOLIDAY_HOST, BATCH_PATH, json);
+            } catch (Exception e) {
+                debug("IPv4 直连失败，退回常规方式：" + e);
+                // IPv4 也失败时退回常规方式再试一次
+                return post(HOLIDAY_HOST, BATCH_PATH, json);
+            }
+        }
+
+        debug("走常规连接");
+        Exception firstFailure;
+        try {
+            return post(HOLIDAY_HOST, BATCH_PATH, json);
+        } catch (Exception e) {
+            firstFailure = e;
+            debug("常规连接失败：" + e);
+        }
+        // 常规方式失败，改用 IPv4 直连重试；SNI 与证书校验仍使用域名
+        debug("改用 IPv4 直连重试");
+        try {
+            String body = postViaIpv4(HOLIDAY_HOST, BATCH_PATH, json);
+            preferIpv4 = true;
+            debug("IPv4 重试成功，后续请求将直接走 IPv4");
+            return body;
+        } catch (Exception e) {
+            debug("IPv4 重试仍失败：" + e);
+            Log.warn("IPv4 重试仍失败: " + e.getMessage());
+            throw firstFailure;
+        }
+    }
+
+    /** 常规 HTTP POST 请求，返回响应正文；非 200 返回 null。 */
+    private static String post(String host, String path, String json) throws IOException {
+        HttpURLConnection conn = null;
+        try {
+            debug("POST https://" + host + path + " 请求体=" + json);
+            conn = (HttpURLConnection) new URL("https://" + host + path).openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(READ_TIMEOUT_MS);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/json");
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(json.getBytes(StandardCharsets.UTF_8));
+            }
+            int code = conn.getResponseCode();
+            debug("HTTP 状态 " + code);
+            if (code != 200) {
+                // 非 200 时正文里通常有接口给出的原因，读出来便于排查
+                debug("非 200 响应正文：" + readAll(conn.getErrorStream()));
+                return null;
+            }
+            return readAll(conn.getInputStream());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 用 IPv4 地址直连并发起 HTTPS POST 请求。
+     * <p>先以 IPv4 地址建立普通 socket，再用域名包装成 SSL socket，
+     * 使 SNI 与证书校验都针对域名，从而保持证书校验有效。
+     */
+    private static String postViaIpv4(String host, String path, String json) throws IOException {
+        InetAddress ipv4 = null;
+        for (InetAddress address : InetAddress.getAllByName(host)) {
+            if (address instanceof Inet4Address) {
+                ipv4 = address;
+                break;
+            }
+        }
+        if (ipv4 == null) throw new IOException("域名无 IPv4 地址");
+        debug("解析到 IPv4 地址 " + ipv4.getHostAddress());
+
+        byte[] bodyBytes = json.getBytes(StandardCharsets.UTF_8);
+        Socket plain = new Socket();
+        SSLSocket ssl = null;
+        try {
+            plain.connect(new InetSocketAddress(ipv4, 443), CONNECT_TIMEOUT_MS);
+            // getDefault() 的声明返回类型是 SocketFactory，
+            // 需转型后才能调用 SSLSocketFactory 的 createSocket(Socket, ...) 重载
+            SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            ssl = (SSLSocket) factory.createSocket(plain, host, 443, true);
+            ssl.setSoTimeout(READ_TIMEOUT_MS);
+            ssl.startHandshake();
+            debug("TLS 握手完成");
+
+            // 该接口返回 Content-Length 且 Connection: close，无需处理分块编码
+            String header = "POST " + path + " HTTP/1.1\r\n"
+                    + "Host: " + host + "\r\n"
+                    + "Content-Type: application/json\r\n"
+                    + "Accept: application/json\r\n"
+                    + "Content-Length: " + bodyBytes.length + "\r\n"
+                    + "Connection: close\r\n\r\n";
+            OutputStream out = ssl.getOutputStream();
+            out.write(header.getBytes(StandardCharsets.UTF_8));
+            out.write(bodyBytes);
+            out.flush();
+            debug("IPv4 请求已发出，请求体=" + json);
+
+            // 必须按字节读取：readLine 会吃掉换行符，导致找不到头部与正文的分界
+            byte[] rawBytes = readAllBytes(ssl.getInputStream());
+            String raw = new String(rawBytes, StandardCharsets.ISO_8859_1);
+            int headerEnd = raw.indexOf("\r\n\r\n");
+            if (headerEnd < 0) {
+                debug("IPv4 响应无响应头，原始内容：" + raw);
+                return null;
+            }
+            String statusLine = raw.substring(0, raw.indexOf("\r\n"));
+            debug("IPv4 状态行：" + statusLine);
+            // 正文字节按 UTF-8 解码；头部按 ISO-8859-1 处理，保证下标与字节一一对应
+            byte[] bodyOnly = new byte[rawBytes.length - (headerEnd + 4)];
+            System.arraycopy(rawBytes, headerEnd + 4, bodyOnly, 0, bodyOnly.length);
+            if (!statusLine.contains(" 200 ")) {
+                debug("IPv4 非 200 响应正文：" + new String(bodyOnly, StandardCharsets.UTF_8));
+                return null;
+            }
+            return new String(bodyOnly, StandardCharsets.UTF_8);
+        } finally {
+            if (ssl != null) {
+                try { ssl.close(); } catch (IOException ignored) {}
+            } else {
+                try { plain.close(); } catch (IOException ignored) {}
+            }
+        }
+    }
+
+    /** 读取流中的全部文本；流为 null 时返回空串。 */
+    private static String readAll(InputStream in) throws IOException {
+        if (in == null) return "";
+        return new String(readAllBytes(in), StandardCharsets.UTF_8);
+    }
+
+    /** 响应体大小上限，防止异常响应把内存吃光。 */
+    private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+
+    /** 读取流中的全部字节；流为 null 时返回空数组。 */
+    private static byte[] readAllBytes(InputStream in) throws IOException {
+        if (in == null) return new byte[0];
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int read;
+        while ((read = in.read(chunk)) != -1) {
+            if (buffer.size() + read > MAX_RESPONSE_BYTES) {
+                throw new IOException("响应体超过 " + MAX_RESPONSE_BYTES + " 字节上限");
+            }
+            buffer.write(chunk, 0, read);
+        }
+        return buffer.toByteArray();
+    }
+
+    // ---------- 时段判断 ----------
+
+    private static boolean isWeekend(LocalDate date) {
+        DayOfWeek day = date.getDayOfWeek();
+        return day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY;
+    }
+
+    /** 指定日期是否为节假日或周末；未缓存时按周末估算，不阻塞主线程。 */
+    private static boolean isHolidayOrWeekend(LocalDate date) {
+        Boolean cached = holidayCache.get(date);
+        if (cached != null) return cached;
+        return isWeekend(date);
+    }
+
+    /** 当前是否处于高峰时段。 */
+    public static boolean isPeak() {
+        return isPeakAt(LocalDateTime.now());
+    }
+
+    /** 判断指定时刻是否处于高峰时段。 */
+    public static boolean isPeakAt(LocalDateTime moment) {
+        return isPeakAt(moment, DeepSeekPricing::isHolidayOrWeekend);
+    }
+
+    /**
+     * 判断指定时刻是否处于高峰时段。
+     * <p>周末与法定节假日全天空闲（含调休上班的周末）。
+     * <p>休息日的判断由调用方注入，这样时段逻辑可以脱离缓存单独测试。
+     */
+    static boolean isPeakAt(LocalDateTime moment, Predicate<LocalDate> isRestDay) {
+        if (isRestDay.test(moment.toLocalDate())) return false;
+
+        LocalTime time = moment.toLocalTime();
+        boolean morning = !time.isBefore(MORNING_START) && time.isBefore(MORNING_END);
+        boolean afternoon = !time.isBefore(AFTERNOON_START) && time.isBefore(AFTERNOON_END);
+        return morning || afternoon;
+    }
+
+    /**
+     * 时段只可能在一天中的这几个时刻发生变化：
+     * 跨天、上午峰期开始与结束、下午峰期开始与结束。
+     */
+    private static final LocalTime[] DAILY_BOUNDARIES = {
+            LocalTime.MIDNIGHT, MORNING_START, MORNING_END, AFTERNOON_START, AFTERNOON_END
+    };
+
+    /** 推算时最多向后看几天，足以覆盖任意节假日连休。 */
+    private static final int MAX_SEARCH_DAYS = 8;
+
+    /**
+     * 计算下一个时段切换时刻。
+     * <p>搜索中若遇到未缓存的日期，会在后台补取，本次仍按周末估算；
+     * 进入存档时已预取未来 {@link #PREFETCH_DAYS} 天，正常不会走到这个兜底。
+     *
+     * @param targetPeak true 找下一个高峰起点，false 找下一个谷期起点
+     */
+    private static LocalDateTime nextBoundary(LocalDateTime from, boolean targetPeak) {
+        debug("开始推算" + (targetPeak ? "下一个峰期" : "下一个谷期") + "，基准时刻 " + from);
+        LocalDateTime result = findNextBoundary(from, targetPeak,
+                DeepSeekPricing::isHolidayOrWeekend,
+                date -> {
+                    // 搜索跨入新日期时按需补取，避免未缓存日期被按周末估算而误判
+                    if (!holidayCache.containsKey(date)) {
+                        debug("推算跨入未缓存日期 " + date + "（"
+                                + date.getDayOfWeek() + "），本次按周末估算");
+                    }
+                    prefetchFrom(date);
+                });
+        if (result.equals(from)) {
+            debug("推算未找到切换点，返回基准时刻 " + from);
+        } else {
+            debug("推算结果：" + result + "（"
+                    + (holidayCache.containsKey(result.toLocalDate()) ? "该日数据来自缓存" : "该日按周末估算")
+                    + "）");
+        }
+        return result;
+    }
+
+    /**
+     * 求下一个时段切换时刻（纯函数：休息日判断与跨天回调都由调用方注入）。
+     * <p>原本按分钟向未来扫描最多 8 天，也就是 11520 次判断；但时段只可能在
+     * {@link #DAILY_BOUNDARIES} 这几个固定时刻变化，所以逐个检查这些边界点就够了
+     * ——最多几十次，结果与逐分钟扫描完全一致。
+     *
+     * @param isRestDay 某天是否为休息日（周末或法定节假日）
+     * @param onNewDate 跨入某个新日期时的回调（用于后台补取数据），可为 null
+     * @return 找到的切换时刻；{@link #MAX_SEARCH_DAYS} 天内没有切换时返回 {@code from}
+     */
+    static LocalDateTime findNextBoundary(LocalDateTime from, boolean targetPeak,
+                                          Predicate<LocalDate> isRestDay,
+                                          Consumer<LocalDate> onNewDate) {
+        LocalDateTime start = from.withSecond(0).withNano(0);
+        boolean currentPeak = isPeakAt(start, isRestDay);
+
+        LocalDate prefetchedDate = start.toLocalDate();
+        for (LocalDateTime cursor : boundariesAfter(start)) {
+            LocalDate date = cursor.toLocalDate();
+            if (!date.equals(prefetchedDate)) {
+                prefetchedDate = date;
+                if (onNewDate != null) onNewDate.accept(date);
+            }
+            boolean peak = isPeakAt(cursor, isRestDay);
+            // 状态发生跨越：谷->峰 得到高峰起点，峰->谷 得到谷期起点
+            if (peak != currentPeak) {
+                if (peak == targetPeak) return cursor;
+                currentPeak = peak;
+            }
+        }
+        return from;
+    }
+
+    /** 生成 {@code start} 之后 {@link #MAX_SEARCH_DAYS} 天内所有可能的切换时刻，按时间升序。 */
+    private static List<LocalDateTime> boundariesAfter(LocalDateTime start) {
+        List<LocalDateTime> result = new ArrayList<>();
+        LocalDateTime horizon = start.plusDays(MAX_SEARCH_DAYS);
+        for (LocalDate date = start.toLocalDate(); !date.isAfter(horizon.toLocalDate()); date = date.plusDays(1)) {
+            for (LocalTime boundary : DAILY_BOUNDARIES) {
+                LocalDateTime cursor = LocalDateTime.of(date, boundary);
+                if (cursor.isAfter(start) && !cursor.isAfter(horizon)) {
+                    result.add(cursor);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 后台补取 {@code from} 起若干天的数据；已缓存或已在请求中时跳过。
+     * <p>供跨天预测兜底使用，数据缺失时才真正发起请求。
+     */
+    private static void prefetchFrom(LocalDate from) {
+        if (holidayCache.containsKey(from)) return;
+        if (bulkPrefetching) return;
+        CompletableFuture.runAsync(() -> fetchRangeFrom(from));
+    }
+
+    /** 下一个谷期起点时刻，用于峰期提示。 */
+    public static LocalDateTime nextValleyStart() {
+        return nextValleyStart(LocalDateTime.now());
+    }
+
+    /** 下一个谷期起点时刻；指定基准时刻，供测试指令使用。 */
+    public static LocalDateTime nextValleyStart(LocalDateTime from) {
+        return nextBoundary(from, false);
+    }
+
+    /** 下一个高峰起点时刻，用于谷期提示。 */
+    public static LocalDateTime nextPeakStart() {
+        return nextPeakStart(LocalDateTime.now());
+    }
+
+    /** 下一个高峰起点时刻；指定基准时刻，供测试指令使用。 */
+    public static LocalDateTime nextPeakStart(LocalDateTime from) {
+        return nextBoundary(from, true);
+    }
+
+    /** 将时刻格式化为"月份-日期 时:分"。 */
+    public static String format(LocalDateTime moment) {
+        return moment.format(TIME_FORMAT);
+    }
+
+    /** 当天数据是否已就绪（无论来自接口还是退回本地）。 */
+    public static boolean isReady() {
+        return isReady(LocalDate.now());
+    }
+
+    /** 指定日期的数据是否已就绪；指定日期，供测试指令使用。 */
+    public static boolean isReady(LocalDate date) {
+        return holidayCache.containsKey(date);
+    }
+
+    /**
+     * 同步查询指定日期的节假日数据，供 {@code /vc dshint date} 在提示前拿到准确结果。
+     * <p>会批量取该日期起 {@link #PREFETCH_DAYS} 天，因此阻塞调用线程，
+     * 仅供手动触发的查询使用，不可放进每 tick 的路径。
+     * <p>该日期已有缓存时直接返回，避免每次查询都发一次网络请求。
+     */
+    public static void queryNow(LocalDate date) {
+        if (holidayCache.containsKey(date)) {
+            debug("查询 " + date + "：已有缓存，跳过请求");
+            return;
+        }
+        fetchRangeFrom(date);
+    }
+
+    /** 是否仍有请求正在进行中，用于推迟依赖跨天预测的提示。 */
+    public static boolean isPrefetching() {
+        return bulkPrefetching;
+    }
+}

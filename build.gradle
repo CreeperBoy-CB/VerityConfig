@@ -13,6 +13,13 @@ group = mod_group_id
 // Java 的 .properties 规范是 ISO-8859-1，Gradle 读取该文件时不会按 UTF-8 解码，
 // 直接写中文会在 processResources 阶段变成乱码。Groovy 源文件则按 UTF-8 编译，
 // 这里用 Unicode 转义可确保任何平台、任何默认编码下都得到正确的中文。
+//
+// 同一个原因，gradle.properties 里的注释必须是纯 ASCII（写中文在大多数编辑器里
+// 都是乱码）。原本放在那里的两条中文说明挪到这里：
+//   * mod_version 会被 processResources 展开进 META-INF/mods.toml，
+//     改 gradle.properties 即可，不要再单独改 mods.toml。
+//   * 构建选项见 gradle.properties 顶部的 org.gradle.daemon / caching / parallel；
+//     关掉 daemon 会让每次构建都重新启动 JVM 并重跑 ForgeGradle 的 setup。
 ext.mod_description = '\u5728\u6E38\u620F\u5185\u914D\u7F6E Verity JE \u6A21\u7EC4\u7684 AI \u53C2\u6570\u3002\n\u5305\u542B AI \u914D\u7F6E\u3001\u9AD8\u7EA7\u8BBE\u7F6E\u3001\u6A21\u7EC4\u7BA1\u7406\u4E0E\u8BB0\u5FC6\u6587\u4EF6\u4FEE\u590D\u529F\u80FD\u3002'
 
 base {
@@ -91,7 +98,7 @@ minecraft {
         client {
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             property 'forge.enabledGameTestNamespaces', mod_id
-            jvmArgs '-Xmx2044m'
+            jvmArgs '-Xmx3072m'
         }
 
         server {
@@ -176,17 +183,19 @@ tasks.named('processResources', ProcessResources).configure {
 // Example for how to get properties into the manifest for reading at runtime.
 tasks.named('jar', Jar).configure {
     manifest {
+        // 刻意不写 Implementation-Timestamp：它取的是构建时刻，会让每次构建产出的
+        // jar 都不一样（不可复现），也永远命不中构建缓存；这个属性也没有任何地方在读。
         attributes([
                 'Specification-Title'     : mod_id,
                 'Specification-Vendor'    : mod_authors,
                 'Specification-Version'   : '1',
                 'Implementation-Title'    : project.name,
                 'Implementation-Version'  : project.jar.archiveVersion,
-                'Implementation-Vendor'   : mod_authors,
-                'Implementation-Timestamp': new java.util.Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+                'Implementation-Vendor'   : mod_authors
         ])
     }
-    archiveFileName = "[Verity配置工具]verityconfig'${mod_version}'.jar"   // 新增
+    // 产物名由上面的 base.archivesName 统一决定，这里不再写第二遍
+    // （两处写同一个名字，改一处忘一处就会不一致）
     finalizedBy 'reobfJar'
 }
 // However if you are in a multi-project build, dev time needs unobfed jar files, so you can delay the obfuscation until publishing by doing:

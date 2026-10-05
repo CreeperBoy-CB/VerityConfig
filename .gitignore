@@ -6,6 +6,13 @@ classes/
 
 # Forge 运行目录（包含服务器/客户端配置、存档等）
 run/
+# data run 配置的 workingDirectory（gradlew runData 会生成）
+run-data/
+# 本模组自己的缓存目录，只在游戏目录下出现；这里一并挡掉以防万一
+.cache/
+
+# Maven 发布输出目录（gradlew publish 会生成）
+mcmodsrepo/
 
 # IDE 配置文件（IDEA）
 .idea/

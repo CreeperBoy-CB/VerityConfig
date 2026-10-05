@@ -1,6 +1,10 @@
 package com.cb2495.verityconfig;
 
-import com.cb2495.verityconfig.util.ModConfig;
+import com.cb2495.verityconfig.config.GeneralSettings;
+import com.cb2495.verityconfig.config.ModConfig;
+import com.cb2495.verityconfig.config.VerityConfigManager;
+import com.cb2495.verityconfig.screen.ModsListScreen;
+import com.cb2495.verityconfig.screen.WelcomeScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
@@ -20,7 +24,7 @@ import java.util.regex.Pattern;
 @Mod(VerityConfig.MODID)
 public class VerityConfig {
     public static final String MODID = "verityconfig";
-    public static final String MODPACK_VERSION = "6.8"; // 整合包版本，可修改
+    public static final String MODPACK_VERSION = "6.9"; // 整合包版本，可修改
 
     public VerityConfig() {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onClientSetup);
@@ -31,7 +35,13 @@ public class VerityConfig {
         // 首次启动时生成默认配置，让玩家能在 config 目录里直接看到可改的选项。
         // 用 enqueueWork 切回主线程：FMLClientSetupEvent 在并行线程上触发，
         // 此时直接取 Minecraft 实例可能拿到未初始化完成的 gameDirectory。
-        event.enqueueWork(ModConfig::createDefaultIfMissing);
+        event.enqueueWork(() -> {
+            ModConfig.createDefaultIfMissing();
+            // 后台预读两份配置。界面的 init() 需要同步拿到值来填充控件，
+            // 提前读到内存之后，渲染线程就不必再为读配置碰磁盘。
+            VerityConfigManager.preload();
+            GeneralSettings.preload();
+        });
     }
 
     @SubscribeEvent
@@ -60,7 +70,9 @@ public class VerityConfig {
      * 扫描 mods 文件夹，提取版本信息并写入 ModsListScreen 的静态字段
      */
     public static void loadVersions() {
-        ModsListScreen.modpackVersion = MODPACK_VERSION;
+        // modpackVersion 的默认值由 ModsListScreen 的字段初始化给出
+        // （取自 MODPACK_VERSION），这里不再重复赋值。
+        // 下面两个必须扫目录才知道，先退回「未知」
         ModsListScreen.verityVersion = "未知";
         ModsListScreen.configModVersion = "未知";
 
