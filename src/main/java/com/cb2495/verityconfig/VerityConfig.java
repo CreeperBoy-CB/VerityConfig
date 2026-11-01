@@ -4,6 +4,7 @@ import com.cb2495.verityconfig.config.GeneralSettings;
 import com.cb2495.verityconfig.config.ModConfig;
 import com.cb2495.verityconfig.config.VerityConfigManager;
 import com.cb2495.verityconfig.screen.ModsListScreen;
+import com.cb2495.verityconfig.screen.RestartPrompt;
 import com.cb2495.verityconfig.screen.WelcomeScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.client.event.ScreenEvent;
@@ -17,6 +18,7 @@ import net.minecraftforge.fml.loading.FMLPaths;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -24,7 +26,7 @@ import java.util.regex.Pattern;
 @Mod(VerityConfig.MODID)
 public class VerityConfig {
     public static final String MODID = "verityconfig";
-    public static final String MODPACK_VERSION = "6.9"; // 整合包版本，可修改
+    public static final String MODPACK_VERSION = "6.10"; // 整合包版本，可修改
 
     public VerityConfig() {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onClientSetup);
@@ -37,6 +39,10 @@ public class VerityConfig {
         // 此时直接取 Minecraft 实例可能拿到未初始化完成的 gameDirectory。
         event.enqueueWork(() -> {
             ModConfig.createDefaultIfMissing();
+            // 两份联动配置（verity-common.toml + simple_translate）缺任一份时，
+            // 用内置模板补齐；已存在的文件不会被覆盖。
+            // 必须排在下面的预读之前：预读会立刻读盘，晚了就读到空配置
+            VerityConfigManager.copyTemplatesIfMissing();
             // 后台预读两份配置。界面的 init() 需要同步拿到值来填充控件，
             // 提前读到内存之后，渲染线程就不必再为读配置碰磁盘。
             VerityConfigManager.preload();
@@ -44,9 +50,23 @@ public class VerityConfig {
         });
     }
 
+    /** 配置自检是否已得到结论：主界面会被反复打开（取消重启、从存档退出等）。 */
+    private static final AtomicBoolean TRANSLATE_RESYNC_SETTLED = new AtomicBoolean(false);
+
     @SubscribeEvent
     public void onTitleScreenOpen(ScreenEvent.Opening event) {
         if (event.getScreen() instanceof net.minecraft.client.gui.screens.TitleScreen) {
+            // 简单翻译的 Key 为空、而 Verity 的有：按 Verity 的配置补写，
+            // 补过就要重启才生效。放在欢迎页判断之前，否则首次启动会被欢迎页挡住。
+            // 只有补写过才置位：置位后不再重复处理，未补写则下次进来还能再查
+            if (!TRANSLATE_RESYNC_SETTLED.get()
+                    && VerityConfigManager.resyncTranslateIfKeyMissing()) {
+                TRANSLATE_RESYNC_SETTLED.set(true);
+                Minecraft.getInstance().tell(() -> RestartPrompt.show(
+                        "重启游戏以应用配置",
+                        "翻译模组配置出现错误，现已修复，需要重启以应用修复，是否重启？"));
+                return;
+            }
             Path configFile = Minecraft.getInstance().gameDirectory.toPath()
                     .resolve("config/verity-common.toml");
             boolean needConfig = true;

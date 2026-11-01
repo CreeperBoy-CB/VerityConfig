@@ -740,6 +740,8 @@ public class ModsListScreen extends Screen {
         // （WelcomeScreen -> VerityConfigScreen 的「完成」 -> 这里）。
         // 从 /vc modls、配置页的「配置模组」按钮等入口进来时不应改动用户的模组开关。
         if (firstTimeSetup) {
+            // 先统一中文禁用后缀，否则下面 enableAutoMods 扫不到这些文件
+            normalizeLegacyDisabledSuffix();
             enableAutoMods();
             firstTimeSetup = false; // 只执行一次，避免后续进入重复触发
         }
@@ -870,6 +872,56 @@ public class ModsListScreen extends Screen {
                 Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal(message).withStyle(ChatFormatting.RED)),
                 false);
+    }
+
+    /** 老整合包用的中文禁用后缀，首次启动时统一改成 {@code .disabled}。 */
+    private static final String LEGACY_DISABLED_SUFFIX = ".jar.已禁用";
+
+    /**
+     * 把 {@code xxx.jar.已禁用} 统一改名为 {@code xxx.jar.disabled}。
+     * <p>历史整合包用的是中文后缀，而本模组只认 {@code .jar.disabled}：
+     * 不改名的话这些模组既不会被算作「已禁用」，也不会被自动启用，界面上直接看不见。
+     * <p>非 Windows 端跳过 {@link #WINDOWS_ONLY_BRACKETS}：那些模组在手机上本来就用不了，
+     * 保留中文后缀让它们继续躺在文件夹里不参与列表，比改成一个「已禁用」条目更有意义。
+     * <p>目标文件已存在时<b>跳过而不覆盖</b>：两份文件可能是不同版本，
+     * 覆盖会永久丢掉其中一个，而保留下来玩家还能自己判断要哪个。
+     * <p>只在首次启动流程里调用。
+     */
+    private void normalizeLegacyDisabledSuffix() {
+        File dir = FMLPaths.MODSDIR.get().toFile();
+        if (!dir.exists() || !dir.isDirectory()) return;
+
+        File[] files = dir.listFiles((d, name) -> name.endsWith(LEGACY_DISABLED_SUFFIX));
+        if (files == null || files.length == 0) return;
+
+        boolean windows = PlatformUtils.isWindows();
+        Pattern bracketPattern = Pattern.compile("\\[(.*?)\\]");
+        int renamed = 0;
+        for (File file : files) {
+            String name = file.getName();
+            // 括号里的名字就是界面上的模组标识，与 mods 列表、自动启用用的是同一套
+            Matcher bracketMatcher = bracketPattern.matcher(name);
+            if (!windows && bracketMatcher.find()
+                    && WINDOWS_ONLY_BRACKETS.contains(bracketMatcher.group(1))) {
+                Log.info("改名跳过（手机端不处理该系统专属模组）: " + name);
+                continue;
+            }
+            String newName = name.substring(0, name.length() - LEGACY_DISABLED_SUFFIX.length())
+                    + DISABLED_SUFFIX;
+            Path target = file.toPath().resolveSibling(newName);
+            if (Files.exists(target)) {
+                Log.warn("改名跳过（目标已存在）: " + name + " -> " + newName);
+                continue;
+            }
+            try {
+                Files.move(file.toPath(), target);
+                renamed++;
+            } catch (IOException e) {
+                // Windows 上文件被占用（另一个实例在跑、杀毒在扫）很常见
+                Log.error("改名失败: " + name + " -> " + newName + "：" + e.getMessage());
+            }
+        }
+        Log.info("首次启动：已将 " + renamed + " 个 .已禁用 模组改名为 .disabled");
     }
 
     private void enableAutoMods() {

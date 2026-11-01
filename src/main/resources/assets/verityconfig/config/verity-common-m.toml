@@ -1,0 +1,81 @@
+
+[GeneralSettings]
+	#In-game days before Verity turns hostile.
+	dayCount = 5
+	#Allow Verity to kick you from the server.
+	canCrash = true
+	#Play the start up video.
+	playVideo = true
+	#Require 'Verity' in every sentence to speak to him.
+	requireVerity = false
+	#The extreme darkness toggle
+	trueDarkness = true
+	#Toggles if Verity should randomly kill wildlife.
+	killWildlife = true
+	#Toggles if Verity can kill entities.
+	killEntities = true
+	#Toggles if Verity should kill villagers.
+	killVillagers = true
+	#Toggles the Karma bar above your hotbar.
+	showKarma = false
+
+[AISettings]
+	#API Key for providers that requires one.
+	apiKey = ""
+	#URL to use for the AI.
+	aiEndpoint = ""
+	#Custom AI model ID to use when custom models are enabled.
+	aiModel = "deepseek-flash"
+	#AI model preset to use.
+	#Allowed Values: SMART, FAST
+	aiModelPreset = "SMART"
+	#Use a custom AI model ID instead of the Smart or Fast preset.
+	useCustomAiModel = true
+	#The provider used to power the AI.
+	#Allowed Values: GEMINI, GROQ, OPENROUTER, MISTRAL, OLLAMA, OPENAI
+	aiProvider = "OPENAI"
+	#Thinking for AI
+	aiThink = false
+
+[VoiceSettings]
+	#Use the text to speech at all
+	useTTS = false
+	#Provider to use for Text To Speech
+	#Allowed Values: NATIVE, LOCAL, GROQ, KOKORO, CARTESIA
+	ttsProvider = "NATIVE"
+	#URL of the TTS server
+	ttsEndpoint = ""
+	#Choose the voice Verity has (GROQ, Local)
+	voice = "Daniel"
+	#Your TTS API Key (Cartesia)
+	ttsApiKey = ""
+	#The language Verity speaks (Cartesia)
+	#Allowed Values: English, German
+	ttsLanguage = "English"
+	#The voice the selected TTS Provider uses (Cartesia Voice ID, Kokoro)
+	endpointVoice = "am_fenrir"
+	#Model for Kokoro
+	kokoroModel = ""
+
+[SpeechSettings]
+	#Provider to use for Speech To Text
+	#Allowed Values: GROQ, NATIVE, WHISPER
+	sttProvider = "NATIVE"
+	#API Key for GROQ.
+	groqKey = ""
+	#Custom endpoint for STT
+	sttEndpoint = ""
+	#Custom model for STT
+	sttModel = ""
+
+[Custom]
+	#The Hue of Verity's texture color (0 to 360 degrees).
+	#Range: 0 ~ 360
+	colorHue = 0
+	#The custom name for Verity. Leave empty to use default 'Verity'.
+	customName = "Verity"
+	#The custom personality for Verity.
+	customPersonality = ""
+	#Enables dev mode
+	devMode = false
+
