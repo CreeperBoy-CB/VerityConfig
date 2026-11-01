@@ -38,6 +38,20 @@ public final class ChatLinks {
                 .append(Component.literal(" - " + description).withStyle(ChatFormatting.GRAY));
     }
 
+    /**
+     * 一段青色文字，点击后由浏览器打开 {@code url}。
+     *
+     * @param hover 悬停时显示的说明
+     */
+    public static Component openUrl(String text, String url, String hover) {
+        return Component.literal(text)
+                .withStyle(style -> style
+                        .withColor(ChatFormatting.AQUA)
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, url))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(hover)))
+                );
+    }
+
     /** 一段普通文字，前面挂上模组名前缀（黄色），正文自定颜色。 */
     public static Component prefixed(String text, ChatFormatting textColor) {
         return Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
