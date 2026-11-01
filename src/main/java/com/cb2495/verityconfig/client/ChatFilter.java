@@ -27,8 +27,11 @@ public class ChatFilter {
             return;
         }
 
-        // 其他两条仅屏蔽
-        if (containsAll(text, "Problem setting AI", "Watch this tutorial")) {
+        // 以下两条仅屏蔽：
+        //   AI 调用出错时 Verity 会发 "AI Setup issue? Tutorial: <链接>"
+        //   首次生成时紧跟自定义提示会发一条可点击的 "Setup Tutorial"（链接）
+        // 两者来自不同类、触发时机也不同，只能分成两条判断
+        if (containsAll(text, "AI Setup issue", "Tutorial")) {
             event.setCanceled(true);
             return;
         }

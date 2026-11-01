@@ -24,12 +24,16 @@ public final class ModConfig {
     private static final String SECTION = "[General]";
     private static final String SHOW_SPONSOR = "ShowSponsor";
     private static final String SHOW_DEEPSEEK_HINT = "ShowDeepSeekHint";
+    private static final String PRICING_HINT_INTRODUCED = "PricingHintIntroduced";
 
     /** 赞助码显示开关的默认值。 */
     private static final boolean DEFAULT_SHOW_SPONSOR = true;
 
     /** DeepSeek 峰谷时段提示的默认值。 */
     private static final boolean DEFAULT_SHOW_DEEPSEEK_HINT = true;
+
+    /** 是否已在首次启动时说明过峰谷提示可关闭。 */
+    private static final boolean DEFAULT_PRICING_HINT_INTRODUCED = false;
 
     /** 配置文件路径，运行时解析（字段初始化早于 Screen 构造，不能提前取实例）。 */
     private static Path configFile() {
@@ -39,13 +43,14 @@ public final class ModConfig {
     // ---------- 缓存 ----------
 
     /**
-     * 两个开关的当前值。
+     * 各配置项的当前值。
      * <p>整体替换而不是就地改字段：{@link #values} 是 volatile 的，
      * 换成新对象能保证读线程立刻看到完整的一次更新，而不是改了一半的状态。
      */
     private static final class Values {
         boolean showSponsor = DEFAULT_SHOW_SPONSOR;
         boolean showDeepSeekHint = DEFAULT_SHOW_DEEPSEEK_HINT;
+        boolean pricingHintIntroduced = DEFAULT_PRICING_HINT_INTRODUCED;
     }
 
     private static volatile Values values = null;
@@ -93,6 +98,7 @@ public final class ModConfig {
         Values updated = new Values();
         updated.showSponsor = value;
         updated.showDeepSeekHint = current.showDeepSeekHint;
+        updated.pricingHintIntroduced = current.pricingHintIntroduced;
         values = updated;
         ConfigIO.run(() -> writeToDisk(updated));
     }
@@ -113,6 +119,28 @@ public final class ModConfig {
         Values updated = new Values();
         updated.showSponsor = current.showSponsor;
         updated.showDeepSeekHint = value;
+        updated.pricingHintIntroduced = current.pricingHintIntroduced;
+        values = updated;
+        ConfigIO.run(() -> writeToDisk(updated));
+    }
+
+    // ---------- 峰谷提示首次说明 ----------
+
+    /**
+     * 是否已在首次启动时说明过「峰谷提示可用 /vc dshint off 关闭」。默认 {@code false}。
+     * <p>只用于「说过一次就不再啰嗦」，不影响提示本身的开关。
+     */
+    public static boolean isPricingHintIntroduced() {
+        return values().pricingHintIntroduced;
+    }
+
+    /** 写入 PricingHintIntroduced；文件或段落不存在时自动创建。 */
+    public static void setPricingHintIntroduced(boolean value) {
+        Values current = values();
+        Values updated = new Values();
+        updated.showSponsor = current.showSponsor;
+        updated.showDeepSeekHint = current.showDeepSeekHint;
+        updated.pricingHintIntroduced = value;
         values = updated;
         ConfigIO.run(() -> writeToDisk(updated));
     }
@@ -130,6 +158,8 @@ public final class ModConfig {
                     result.showSponsor = ConfigFileUtils.parseBoolean(line);
                 } else if (ConfigFileUtils.lineMatchesKey(line, SHOW_DEEPSEEK_HINT)) {
                     result.showDeepSeekHint = ConfigFileUtils.parseBoolean(line);
+                } else if (ConfigFileUtils.lineMatchesKey(line, PRICING_HINT_INTRODUCED)) {
+                    result.pricingHintIntroduced = ConfigFileUtils.parseBoolean(line);
                 }
             }
         } catch (Exception e) {
@@ -150,6 +180,7 @@ public final class ModConfig {
         }
         ConfigFileUtils.replaceOrAddRaw(lines, SHOW_SPONSOR, String.valueOf(snapshot.showSponsor), SECTION);
         ConfigFileUtils.replaceOrAddRaw(lines, SHOW_DEEPSEEK_HINT, String.valueOf(snapshot.showDeepSeekHint), SECTION);
+        ConfigFileUtils.replaceOrAddRaw(lines, PRICING_HINT_INTRODUCED, String.valueOf(snapshot.pricingHintIntroduced), SECTION);
         ConfigFileUtils.writeLines(file, lines);
     }
 }

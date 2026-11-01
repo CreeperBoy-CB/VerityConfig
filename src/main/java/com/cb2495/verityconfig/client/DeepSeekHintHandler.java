@@ -96,14 +96,14 @@ public class DeepSeekHintHandler {
             }
             pendingHint = false;
             lastPeak = peak;
-            sendHint(peak, true);
+            sendHint(peak);
             return;
         }
 
         // 时段切换提示
         if (lastPeak != null && lastPeak != peak) {
             lastPeak = peak;
-            sendHint(peak, false);
+            sendHint(peak);
             return;
         }
         lastPeak = peak;
@@ -171,11 +171,12 @@ public class DeepSeekHintHandler {
 
     /**
      * 发送时段提示。
+     * <p>「可输入 /vc dshint off 关闭」的说明不在这里发：
+     * 它只在首次启动时由 {@link ChatFilter} 说一次，之后不再重复。
      *
-     * @param peak       当前是否为高峰时段
-     * @param withToggle 是否附带关闭提示的说明（仅进入存档时）
+     * @param peak 当前是否为高峰时段
      */
-    private static void sendHint(boolean peak, boolean withToggle) {
+    private static void sendHint(boolean peak) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player == null) return;
@@ -199,15 +200,6 @@ public class DeepSeekHintHandler {
                                     .withStyle(ChatFormatting.GREEN))
                             .append(Component.literal(next).withStyle(ChatFormatting.GOLD))
                             .append(Component.literal(" 前低价游玩").withStyle(ChatFormatting.GREEN)),
-                    false);
-        }
-
-        if (withToggle) {
-            player.displayClientMessage(
-                    Component.literal("[提示]").withStyle(ChatFormatting.YELLOW)
-                            .append(Component.literal("输入 ").withStyle(ChatFormatting.WHITE))
-                            .append(ChatLinks.suggestCmd("/vc dshint off", ChatLinks.CLICK_TO_FILL))
-                            .append(Component.literal(" 可关闭此提示。").withStyle(ChatFormatting.WHITE)),
                     false);
         }
     }
