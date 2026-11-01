@@ -168,14 +168,38 @@ public class VerityConfigManager {
      * 保存 AI 配置：{@code verity-common.toml} 与 simple_translate 的配置一起写。
      * <p>内存缓存<b>同步</b>更新，磁盘写入交给后台线程——界面重建控件时
      * （例如窗口缩放触发 {@code init()}）立刻就能读到刚保存的值。
+     * <p>写完之后立刻尝试让两个模组各自重载配置，成功后都无需重启即可使用新值。
      */
     public static void saveAll(ConfigData data, String provider) {
         ConfigData snapshot = data.copy();
         cached = snapshot;
-        ConfigIO.run(() -> {
-            writeVerityConfig(snapshot);
-            writeSimpleTranslateConfig(provider, snapshot.apiKey, snapshot.endpoint, snapshot.model);
-        });
+        ConfigIO.run(() -> writeAllNow(snapshot, provider));
+    }
+
+    /**
+     * 同步写盘，并让 Verity 与简单翻译立刻重载配置，返回两者是否都已即时生效。
+     * <p>用于「完成」这种需要当场生效的操作：异步写盘的话，调用方返回时
+     * 重载还没发生，两边也就都还是旧配置。
+     * <p>本方法会阻塞调用线程做磁盘 IO，不要在每帧都会执行的路径上调用。
+     *
+     * @return {@code true} 表示两边都已生效，调用方不必再提示重启
+     */
+    public static boolean saveAllAndReload(ConfigData data, String provider) {
+        ConfigData snapshot = data.copy();
+        cached = snapshot;
+        return writeAllNow(snapshot, provider);
+    }
+
+    /** 写两份配置并让两边各自重载；返回是否全部即时生效。 */
+    private static boolean writeAllNow(ConfigData snapshot, String provider) {
+        writeVerityConfig(snapshot);
+        writeSimpleTranslateConfig(provider, snapshot.apiKey, snapshot.endpoint, snapshot.model);
+        // 必须排在写盘之后：重载读的是刚写好的文件。
+        // 两个都算上了才算成功，任何一个没能即时生效都要退回「提示重启」。
+        boolean verityOk = VerityConfigReloader.reloadVerityConfig(configFile());
+        boolean translateOk = TranslateConfigReloader.reloadTranslateConfig(
+                translateConfig(), snapshot.apiKey);
+        return verityOk && translateOk;
     }
 
     private static void writeVerityConfig(ConfigData data) {

@@ -250,14 +250,23 @@ public class VerityConfigScreen extends Screen {
         // 8. 完成按钮（语音行两端都显示，位置固定）
         int saveButtonY = startY + ROW_DONE;
         this.addRenderableWidget(Button.builder(Component.literal("完成"), btn -> {
-            pendingSave.runNow();
+            // 同步写盘并让 Verity 与简单翻译各自重载配置。
+            // 两边都生效时就不必再打扰玩家去重启。
+            boolean reloaded = saveConfigAndReload();
             if (ModsListScreen.firstTimeSetup) {
                 // 注意：不要在这里把 firstTimeSetup 置回 false。
                 // ModsListScreen.init() 要靠它来决定是否执行首次自动启用模组，
                 // 提前清掉会导致自动启用永远不触发。
                 Minecraft.getInstance().setScreen(new ModsListScreen());
-            } else {
+            } else if (!reloaded) {
+                // 有一边没能即时生效，退回提示重启。
+                // 注意这里必须弹框：它同时承担「离开本界面」的职责，
+                // 确认或取消失败分支都会切走界面。
                 showRestartConfirm();
+            } else {
+                // 已全部即时生效，无需重启：照常在关闭时退出界面，
+                // 否则点「完成」后什么也不会发生，玩家会以为按钮坏了
+                onClose();
             }
         }).pos(w / 2 - 50, saveButtonY).size(100, 20).build());
 
@@ -549,6 +558,30 @@ public class VerityConfigScreen extends Screen {
         // 这里加一道保护，免得将来改动调用时机时踩到空指针
         if (apiKeyField == null || endpointField == null || modelDropdown == null) return;
 
+        VerityConfigManager.ConfigData data = collectConfig();
+
+        // 写盘在后台线程进行；这里同步更新内存缓存，界面立刻能读到新值
+        VerityConfigManager.saveAll(data, selectedProvider);
+        loadedConfig = data;
+    }
+
+    /**
+     * 同步写盘，并让 Verity 与简单翻译各自重载配置。
+     * <p>只给「完成」按钮用：其它路径（输入停顿、拖滑块）仍然走异步的 {@link #saveConfig()}，
+     * 避免每敲一个字符都阻塞一次。
+     *
+     * @return {@code true} 表示两边都已即时生效，无需提示重启
+     */
+    private boolean saveConfigAndReload() {
+        if (apiKeyField == null || endpointField == null || modelDropdown == null) return false;
+        VerityConfigManager.ConfigData data = collectConfig();
+        boolean ok = VerityConfigManager.saveAllAndReload(data, selectedProvider);
+        loadedConfig = data;
+        return ok;
+    }
+
+    /** 从当前控件取值组装一份配置；不写盘。 */
+    private VerityConfigManager.ConfigData collectConfig() {
         VerityConfigManager.ConfigData data = new VerityConfigManager.ConfigData();
         data.apiKey = apiKeyField.getValue().trim();
         data.endpoint = endpointField.getValue().trim();
@@ -574,10 +607,7 @@ public class VerityConfigScreen extends Screen {
             data.useTTS = true;
             data.ttsProvider = "NATIVE".equals(loadedConfig.ttsProvider) ? "NATIVE" : "LOCAL";
         }
-
-        // 写盘在后台线程进行；这里同步更新内存缓存，界面立刻能读到新值
-        VerityConfigManager.saveAll(data, selectedProvider);
-        loadedConfig = data;
+        return data;
     }
 
     @Override

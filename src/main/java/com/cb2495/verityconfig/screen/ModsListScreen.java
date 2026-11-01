@@ -736,6 +736,10 @@ public class ModsListScreen extends Screen {
     protected void init() {
         VerityConfig.loadVersions();
 
+        // 每次进入界面都重新统计改动：resize 也会走到这里，但那不是玩家的改动。
+        // 必须放在下面的自动启用之前，否则首次启动的自动启用不会被计入改动。
+        modFilesChanged = false;
+
         // 只在「首次启动配置流程」里自动启用模组
         // （WelcomeScreen -> VerityConfigScreen 的「完成」 -> 这里）。
         // 从 /vc modls、配置页的「配置模组」按钮等入口进来时不应改动用户的模组开关。
@@ -843,16 +847,31 @@ public class ModsListScreen extends Screen {
     }
 
     /**
+     * 本次打开模组列表以来，是否真的改动过模组文件（启用 / 禁用 / 统一后缀）。
+     * <p>只用于决定点「完成」后要不要提示重启：没有改动就没有需要重启的东西，
+     * 弹一个「是否重启」只会让玩家困惑。
+     * <p>在 {@link #init()} 里复位：resize 会重建界面，但那不是玩家的改动。
+     */
+    private static boolean modFilesChanged;
+
+    /**
      * 把模组文件改成新名字，返回是否成功。
      * <p>用 {@link Files#move} 而不是 {@link File#renameTo}：后者失败时只返回
-     * {@code false}，不给任何原因。而 Windows 上 jar 被占用（另一个实例正在运行、
-     * 杀毒软件正在扫描）是很常见的情况，静默失败会让玩家以为开关坏了。
+     * {@code false}，不给任何原因，排查时无从下手。
+     * <p>关于失败的概率：<b>在当前进程里禁用或启用正在运行的模组不会失败</b>，
+     * 这一点已在实际游戏内验证过——Windows 上 JVM 读完 jar 条目后就释放了句柄。
+     * 代价是被改名的模组要等到下次启动才真正卸载，所以本界面会提示重启。
+     * <p>真正会失败的是文件被<b>其它进程</b>独占：另一个启动器实例正在运行、
+     * 杀毒软件正在扫描该文件等。这类情况少见，但一旦发生必须让玩家看到原因，
+     * 否则会以为开关坏了。
      * <p>{@code REPLACE_EXISTING} 对应原先「先删掉同名目标再改名」的行为。
      */
     private static boolean renameModFile(File source, String newName) {
         try {
             Files.move(source.toPath(), source.toPath().resolveSibling(newName),
                     StandardCopyOption.REPLACE_EXISTING);
+            // 只有真的改成功了才算，失败的情况不改动模组状态，也就不需要重启
+            modFilesChanged = true;
             return true;
         } catch (IOException e) {
             String action = newName.endsWith(".disabled") ? "禁用" : "启用";
@@ -916,6 +935,8 @@ public class ModsListScreen extends Screen {
             try {
                 Files.move(file.toPath(), target);
                 renamed++;
+                // 后缀变了意味着模组文件被动过，同样需要重启才能让 Forge 重新识别
+                modFilesChanged = true;
             } catch (IOException e) {
                 // Windows 上文件被占用（另一个实例在跑、杀毒在扫）很常见
                 Log.error("改名失败: " + name + " -> " + newName + "：" + e.getMessage());
@@ -1117,9 +1138,9 @@ public class ModsListScreen extends Screen {
     }
 
     /**
-     * 点「完成」后的检查链：教程提醒 → 前置模组检查 → 重启确认。
-     * <p>拆成两级各自判断，任何一级没有内容就跳到下一级，
-     * 全都通过时直接弹重启确认。
+     * 点「完成」后的检查链：教程提醒 → 前置模组检查 → 结束。
+     * <p>拆成两级各自判断，任何一级没有内容就跳到下一级。
+     * <p>最终是否提示重启由 {@link #finish()} 根据「有没有真的改过模组文件」决定。
      */
     private void checkUnreadGuidesThenRestart() {
         List<ModGuideReminderScreen.GuideEntry> unread = collectUnreadGuides();
@@ -1136,16 +1157,28 @@ public class ModsListScreen extends Screen {
     private void checkUnusedPrerequisitesThenRestart() {
         List<String> unused = findUnusedPrerequisites();
         if (unused.isEmpty()) {
-            showRestartConfirm();
+            finish();
             return;
         }
         Minecraft.getInstance().setScreen(new UnusedPrerequisiteScreen(
-                unused, this, this::showRestartConfirm));
+                unused, this, this::finish));
+    }
+
+    /**
+     * 检查链的终点：改了模组文件才提示重启，没改就直接退出界面。
+     * <p>没改过还问「是否重启」只会让玩家困惑——重启也不会改变任何东西。
+     */
+    private void finish() {
+        if (modFilesChanged) {
+            showRestartConfirm();
+        } else {
+            Minecraft.getInstance().setScreen(null);
+        }
     }
 
     private void showRestartConfirm() {
-        // 与配置界面、教程提醒界面共用同一个确认框
-        RestartPrompt.show();
+        // 与配置界面、教程提醒界面共用同一个确认框，但文案要说明是模组变了
+        RestartPrompt.show("重启以重载模组", "启用/禁用模组需要重启才能应用，是否重启？");
     }
 
     @Override
