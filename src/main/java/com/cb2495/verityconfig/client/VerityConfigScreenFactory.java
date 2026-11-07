@@ -78,7 +78,7 @@ public final class VerityConfigScreenFactory {
                     .category(voice())
                     .category(speech())
                     .category(personalisation())
-                    .category(advanced());
+                    .category(advanced(previous));
             // 点「完成」时由 YACL 调用：写盘后 Verity 自己会重载配置，无需重启
             builder.save(() -> VeritySpec.save(spec));
             if (keepTab != null) {
@@ -329,14 +329,57 @@ public final class VerityConfigScreenFactory {
     // 高级
     // ============================================================
 
-    private static ConfigCategory advanced() {
+    private static ConfigCategory advanced(Screen previous) {
         ConfigCategory.Builder category = ConfigCategory.createBuilder().name(Component.literal("高级"));
         tickBox(category, "DEV_MODE");
         string(category, "AI_ENDPOINT");
         string(category, "TTS_ENDPOINT");
         string(category, "STT_ENDPOINT");
         string(category, "KOKORO_MODEL");
+        category.option(ButtonOption.createBuilder()
+                .name(Component.literal("原版配置界面"))
+                .text(Component.literal("打开"))
+                .description(OptionDescription.of(Component.literal(
+                        "打开 Verity JE 自带的英文配置界面。\n"
+                                + "内容与这里的选项一一对应，改的是同一份配置，只是文字是英文的。\n\n"
+                                + "那边的「完成」按钮指向的这个中文界面，随时可以跳回来。")))
+                .action((screen, option) -> openOriginal(previous))
+                .build());
         return category.build();
+    }
+
+    /**
+     * 打开 Verity 自带的英文配置界面，并让它的关闭落点回到本模组的中文界面。
+     *
+     * <p>原版界面的三个出口都走 {@code onClose()} → {@code setScreen(parent)}，
+     * 所以只要把它的 {@code parent} 改成一个中转界面，完成/取消/Esc 就都会
+     * 落到中文界面（原理见 {@link OriginalConfigBackHook}）。
+     */
+    private static void openOriginal(Screen previous) {
+        Screen original = originalScreen(null);
+        if (original == null) return;
+        var hop = new OriginalConfigBackHook.HopScreen(previous);
+        // 改不动就照原样显示：玩家关掉后会回主菜单，只是绕远，不会卡死
+        OriginalConfigBackHook.redirectClose(original, hop);
+        Minecraft.getInstance().setScreen(original);
+    }
+
+    /**
+     * 调 Verity 自己的界面工厂，不抛异常的版本。
+     *
+     * @param previous 原版界面的「上一页」；{@code null} 表示主菜单
+     * @return 原版界面；Verity 没装或者类名变了时为 {@code null}
+     */
+    static Screen originalScreen(Screen previous) {
+        try {
+            Class<?> clazz = Class.forName("varmite.verity.VerityConfigUI");
+            var method = clazz.getMethod("createYACLScreen", Screen.class);
+            Object built = method.invoke(null, previous);
+            return built instanceof Screen screen ? screen : null;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.warn("打开 Verity 原配置界面失败: " + e);
+            return null;
+        }
     }
 
     // ============================================================
