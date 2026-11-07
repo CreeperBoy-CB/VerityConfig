@@ -130,6 +130,13 @@ repositories {
     // Put repositories for dependencies here
     // ForgeGradle automatically adds the Forge maven and Maven Central for you
 
+    // YACL 作者自己的 maven，托管 yet-another-config-lib 的发布版。
+    // 本模组的配置界面就是用它的 API 搭的，必须能解析到这个依赖。
+    maven {
+        name 'Xander Maven'
+        url 'https://maven.isxander.dev/releases'
+    }
+
     // If you have mod jar dependencies in ./libs, you can declare them as a repository like so.
     // See https://docs.gradle.org/current/userguide/declaring_repositories.html#sub:flat_dir_resolver
     // flatDir {
@@ -144,6 +151,23 @@ dependencies {
     // If the group id is "net.minecraft" and the artifact id is one of ["client", "server", "joined"],
     // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // 刻意不加 mixin 的 annotationProcessor。
+    // 它会在编译期强制校验 @Mixin 的目标类能不能找到，而 Verity 的
+    // varmite.verity.* 不在本模组的编译类路径上（我们只按类名注入，不 import），
+    // 加上它就会直接编译失败：
+    //   Mixin target varmite.verity.VerityConfigUI could not be found
+    // refmap 由 ForgeGradle 自己生成，不需要这个处理器。
+
+    // 也不引入 Mixin 本身：Forge 1.20.1 不会加载普通模组自带的 mixin 配置
+    // （mods.toml 的 [[mixins]] 段和运行时 Mixins.addConfiguration 都试过，均不生效）。
+
+    // YACL：Verity 的配置界面就是它渲染的，本模组用同一套 API 搭中文界面，
+    // 所以要编译期可见。用 compileOnly 而不是实现依赖——不打进 jar：
+    // Verity 本身就依赖 YACL，装了 Verity 的玩家一定有它。
+    // fg.deobf 把 maven 上的 SRG 名重映射回开发用的 official 名字，否则
+    // 拿不到 Minecraft 的类，编译会报一堆「找不到符号」。
+    compileOnly fg.deobf("dev.isxander:yet-another-config-lib:${yacl_version}")
 
     // Example mod dependency with JEI - using fg.deobf() ensures the dependency is remapped to your development mappings
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime

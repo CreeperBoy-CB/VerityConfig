@@ -1,0 +1,28 @@
+{
+  "parent": "verity:verity/karmachange",
+  "display": {
+    "icon": {
+      "item": "minecraft:diamond"
+    },
+    "title": {
+      "text": "友好的小助手"
+    },
+    "description": {
+      "text": "让 Verity 感到开心"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "goodkarma": {
+      "trigger": "verity:goodkarma"
+    }
+  },
+  "requirements": [
+    [
+      "goodkarma"
+    ]
+  ]
+}

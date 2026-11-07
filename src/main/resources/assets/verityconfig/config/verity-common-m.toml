@@ -25,7 +25,7 @@
 	#URL to use for the AI.
 	aiEndpoint = ""
 	#Custom AI model ID to use when custom models are enabled.
-	aiModel = "deepseek-flash"
+	aiModel = ""
 	#AI model preset to use.
 	#Allowed Values: SMART, FAST
 	aiModelPreset = "SMART"

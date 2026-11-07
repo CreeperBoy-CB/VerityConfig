@@ -1,0 +1,28 @@
+{
+  "parent": "verity:verity/talk",
+  "display": {
+    "icon": {
+      "item": "minecraft:creeper_head"
+    },
+    "title": {
+      "text": "发出声响"
+    },
+    "description": {
+      "text": "让 Verity 发出些什么声音"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "playsound": {
+      "trigger": "verity:playsound"
+    }
+  },
+  "requirements": [
+    [
+      "playsound"
+    ]
+  ]
+}

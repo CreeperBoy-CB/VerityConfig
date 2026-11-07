@@ -1,0 +1,28 @@
+{
+  "parent": "verity:verity/talk",
+  "display": {
+    "icon": {
+      "item": "minecraft:amethyst_shard"
+    },
+    "title": {
+      "text": "情绪变化"
+    },
+    "description": {
+      "text": "影响 Verity 的心情"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "karmachange": {
+      "trigger": "verity:karmachange"
+    }
+  },
+  "requirements": [
+    [
+      "karmachange"
+    ]
+  ]
+}

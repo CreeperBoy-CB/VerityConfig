@@ -1,0 +1,27 @@
+{
+  "item.verity.verity_item": "Verity™",
+  "item.verity.flashlight": "手电筒",
+
+  "creativetab.verity.verity_tab": "Verity™",
+
+  "key.verity.push_to_talk": "与 Verity 对话（按住说话）",
+  "category.verity.keys": "Verity Mod",
+  "key.verity.cycle_mic": "切换麦克风设备",
+  "key.verity.toggle_ollama_progress": "显示/隐藏 Ollama 下载进度",
+
+  "entity.verity.box": "盒子",
+  "entity.verity.verity": "Verity™",
+  "entity.verity.verity_demon": "§4§lVERITY",
+
+  "sounds.verity.box_click": "盒子: 咔哒",
+  "sounds.verity.box_open": "盒子: 开启",
+  "sounds.verity.box_verity_0": "Verity™: 有人吗?",
+  "sounds.verity.box_verity_1": "Verity™: 撞击盒子",
+  "sounds.verity.box_verity_2": "Verity™: 外面有人吗？",
+  "sounds.verity.intro": "Verity™: 自我介绍",
+  "sounds.verity.impact": "Verity™: 撞击",
+  "sounds.verity.intro_cinematic": "开场音乐",
+  "sounds.verity.chase": "§l§4RUN",
+  "sounds.verity.bone_break": "§4§lVERITY§r: 骨头折断",
+  "sounds.verity.edit": "音乐: My Gal"
+}

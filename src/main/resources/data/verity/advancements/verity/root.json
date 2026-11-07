@@ -1,0 +1,28 @@
+{
+  "display": {
+    "icon": {
+      "item": "verity:verity_item"
+    },
+    "title": {
+      "text": "你好，我是 Verity"
+    },
+    "description": {
+      "text": "嘿↑，我是我，我是巴↘拉↗迪~"
+    },
+    "background": "minecraft:textures/block/yellow_wool.png",
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "open_box": {
+      "trigger": "verity:open_box"
+    }
+  },
+  "requirements": [
+    [
+      "open_box"
+    ]
+  ]
+}

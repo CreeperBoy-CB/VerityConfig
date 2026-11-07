@@ -82,6 +82,50 @@ public class VerityConfigManager {
         }
     }
 
+    // ========== 内置模板的默认值 ==========
+    /**
+     * 内置模板里每个配置项的默认值（toml 键名 -> 原始文本）。
+     * <p>界面上那个「重置」按钮要回到的就是这里，而不是 Verity 代码里
+     * {@code define(...)} 写死的值——两者并不相同：模板里
+     * {@code useCustomAiModel = true}、{@code aiThink = false}，
+     * 而 Verity 的代码默认是 {@code false} / {@code true}。
+     * <p>按平台选模板，与 {@link #copyTemplatesIfMissing()} 用同一份规则。
+     * <p>读不到模板时返回空表，调用方退回 Verity 自己的默认值。
+     */
+    private static volatile Map<String, String> templateDefaults;
+
+    public static Map<String, String> templateDefaults() {
+        Map<String, String> cached = templateDefaults;
+        if (cached != null) return cached;
+        String name = PlatformUtils.isWindows() ? TEMPLATE_VERITY : TEMPLATE_VERITY_MOBILE;
+        Map<String, String> parsed = new LinkedHashMap<>();
+        try (InputStream in = VerityConfigManager.class.getResourceAsStream(TEMPLATE_DIR + name)) {
+            if (in == null) {
+                Log.warn("模板配置不存在: " + TEMPLATE_DIR + name);
+            } else {
+                // 按行拆：\R 覆盖 \r\n、\n、\r 三种换行，模板在任何编辑器里存出来都能读
+                String text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+                for (String line : text.split("\\R")) {
+                    String trimmed = line.trim();
+                    // 跳过空行、注释与段落头；段落名对重置没有意义，键名在文件内唯一
+                    if (trimmed.isEmpty() || trimmed.charAt(0) == '#' || trimmed.charAt(0) == '[') {
+                        continue;
+                    }
+                    int eq = trimmed.indexOf('=');
+                    if (eq <= 0) continue;
+                    String key = trimmed.substring(0, eq).trim();
+                    String value = trimmed.substring(eq + 1).trim();
+                    if (!key.isEmpty()) parsed.put(key, value);
+                }
+                Log.info("已读取内置模板默认值，共 " + parsed.size() + " 项：" + name);
+            }
+        } catch (IOException | RuntimeException e) {
+            Log.warn("读取内置模板默认值失败: " + e);
+        }
+        templateDefaults = parsed;
+        return parsed;
+    }
+
     // 提供商的端点、API 格式、Key 地址与模型统一由 Providers 提供，
     // 这里只做转发，避免出现第二份提供商清单。
     // （原本 API_FORMATS 这个字段也一并删掉了：它只是 Providers 的副本。）

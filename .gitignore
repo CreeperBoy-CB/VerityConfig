@@ -39,3 +39,7 @@ logs/
 # 系统文件
 Thumbs.db
 .DS_Store
+
+# Verity 反编译/汉化素材（约 250MB），只作参考，产物已放进 src/main/resources
+# 目录名含空格，结尾的 / 表示只匹配目录
+something about verityje/

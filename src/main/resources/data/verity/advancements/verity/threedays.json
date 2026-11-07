@@ -1,0 +1,28 @@
+{
+  "parent": "verity:verity/badday",
+  "display": {
+    "icon": {
+      "item": "minecraft:spider_eye"
+    },
+    "title": {
+      "text": "Something is coming in 3 days"
+    },
+    "description": {
+      "text": "他为什么这么说？"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "threedays": {
+      "trigger": "verity:threedays"
+    }
+  },
+  "requirements": [
+    [
+      "threedays"
+    ]
+  ]
+}

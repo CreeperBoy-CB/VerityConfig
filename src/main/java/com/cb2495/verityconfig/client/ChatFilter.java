@@ -20,27 +20,26 @@ public class ChatFilter {
 
     @SubscribeEvent
     public static void onClientChatReceived(ClientChatReceivedEvent event) {
+        // Verity 的硬编码英文（含聊天栏里那些）靠这里第一次初始化
+        VerityTranslator.ensureReady();
+
         Component message = event.getMessage();
         if (message == null) return;
 
         String text = message.getString();
 
         // Need help setting up this mod? Watch this tutorial. → 替换为自定义提示
-        if (containsAll(text, "Need help setting up this mod", "Watch this tutorial")) {
+        // 这两句会被 VerityTranslator 翻成中文，所以关键词也换成中文的
+        if (containsAll(text, "需要帮助设置此模组吗", "教程")) {
             event.setCanceled(true);
             sendCustomHelpMessage();
             return;
         }
 
-        // 以下两条仅屏蔽：
-        //   AI 调用出错时 Verity 会发 "AI Setup issue? Tutorial: <链接>"
-        //   首次生成时紧跟自定义提示会发一条可点击的 "Setup Tutorial"（链接）
-        // 两者来自不同类、触发时机也不同，只能分成两条判断
-        if (containsAll(text, "AI Setup issue", "Tutorial")) {
-            event.setCanceled(true);
-            return;
-        }
-        if (text.contains("Setup Tutorial")) {
+        // 首次生成时 Verity 会紧跟自定义提示发一条可点击的 "Setup Tutorial"（链接），
+        // 第一句已经被上面拦下了，剩下这条链接没有意义，一并去掉。
+        // （AI 出错时那条 "AI Setup issue? Tutorial: <链接>" 不拦：翻成中文后它本身是能看懂的）
+        if (text.contains("设置教程")) {
             event.setCanceled(true);
         }
     }

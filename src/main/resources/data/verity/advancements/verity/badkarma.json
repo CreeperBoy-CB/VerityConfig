@@ -1,0 +1,28 @@
+{
+  "parent": "verity:verity/karmachange",
+  "display": {
+    "icon": {
+      "item": "minecraft:rotten_flesh"
+    },
+    "title": {
+      "text": "我也有感情"
+    },
+    "description": {
+      "text": "让 Verity 生气"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "badkarma": {
+      "trigger": "verity:badkarma"
+    }
+  },
+  "requirements": [
+    [
+      "badkarma"
+    ]
+  ]
+}
